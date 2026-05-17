@@ -11,7 +11,7 @@ Description:
 
 #define DEBUG_BUILD 1
 #define COPY_TO_BIN 1
-#define ONLY_BUILD_NON_EXISTANT_SAMPLES 0
+#define ONLY_BUILD_NON_EXISTANT_SAMPLES 1
 
 #if DEBUG_BUILD
 #define IF_DEBUG(...)    __VA_ARGS__
@@ -40,9 +40,11 @@ struct SappExample
 	bool isCpp;
 	bool hasShader;
 	bool isComputeShader;
+	const char* dependency[4];
 };
 
 void DownloadSokolIfNeeded();
+void DownloadDCImguiIfNeeded();
 
 int main(int argc, char* argv[])
 {
@@ -51,6 +53,7 @@ int main(int argc, char* argv[])
 	IF_WINDOWS(bool isMsvcInitialized = WasMsvcDevBatchRun());
 	
 	DownloadSokolIfNeeded();
+	DownloadDCImguiIfNeeded();
 	
 	#if COPY_TO_BIN
 	if (!DoesFolderExist(StrLit("../bin"))) { mkdir("../bin", FOLDER_PERMISSIONS); }
@@ -72,6 +75,8 @@ int main(int argc, char* argv[])
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/../sokol/util");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/sapp");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/libs");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|imgui", CL_INCLUDE_DIR, "[ROOT]/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|cimgui", CL_INCLUDE_DIR, "[ROOT]/dcimgui/src");
 	IF_DEBUG(AddTaggedArg(&commonArgs, T_MSVC_CL, CL_DEBUG_INFO));
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_OPTIMIZATION_LEVEL, DEBUG_BUILD ? "d" : "2");
 	
@@ -90,6 +95,8 @@ int main(int argc, char* argv[])
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/../sokol/util");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/sapp");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/libs");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|imgui", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|cimgui", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_OUTPUT_FILE, "sokol_triangle");
 	AddTaggedArgNt(&commonArgs, T_CLANG T_OSX "==false", CLI_QUOTED_ARG, "[ROOT]/main.c");
 	AddTaggedArgNt(&commonArgs, T_CLANG T_OSX "==true", CLI_QUOTED_ARG, "main.m");
@@ -121,7 +128,8 @@ int main(int argc, char* argv[])
 	// |         Linker Flags         |
 	// +==============================+
 	AddTaggedArg(&commonArgs, T_MSVC_CL, CL_LINK);
-	AddTaggedArg(&commonArgs, T_MSVC_CL, LINK_DISABLE_INCREMENTAL);
+	AddTaggedArg(&commonArgs, T_MSVC_CL_OR_LINK, LINK_DISABLE_INCREMENTAL);
+	AddTaggedArg(&commonArgs, T_MSVC_LINK, LINK_NO_LOGO);
 	
 	// +--------------------------------------------------------------+
 	// |                Compile sokol Implementations                 |
@@ -142,7 +150,7 @@ int main(int argc, char* argv[])
 		{
 			PrintLine("[Building %.*s for WINDOWS...]", StrPrint(sokolObjFile));
 			InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
-			RunCliProgramAndExitOnFailure(StrLit("cl"), T_MSVC_CL T_WINDOWS, &args, FormatStr("Failed to compile sokol.c into %.*s", StrPrint(sokolObjFile)));
+			RunCliProgramAndExitOnFailure(StrLit(EXE_MSVC_CL), T_MSVC_CL T_WINDOWS T_LANG_C, &args, FormatStr("Failed to compile sokol.c into %.*s", StrPrint(sokolObjFile)));
 			AssertFileExist(sokolObjFile, true);
 			PrintLine("[Successfully built %.*s for WINDOWS!]", StrPrint(sokolObjFile));
 		}
@@ -152,13 +160,101 @@ int main(int argc, char* argv[])
 	}
 	
 	// +--------------------------------------------------------------+
+	// |                        Compile Imgui                         |
+	// +--------------------------------------------------------------+
+	Str imguiLibPath = StrLit("imgui.lib");
+	Str imguiDllPath = StrLit("imgui.dll");
+	if (!DoesFileExist(imguiDllPath) || !DoesFileExist(imguiLibPath))
+	{
+		PrintLine("[Building %.*s...]", StrPrint(imguiDllPath));
+		StrArray sourceFiles = EMPTY;
+		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/cimgui.cpp");
+		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/cimgui_internal.cpp");
+		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui_demo.cpp");
+		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui_draw.cpp");
+		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui_tables.cpp");
+		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui_widgets.cpp");
+		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui.cpp");
+		
+		// +==============================+
+		// |   Build Imgui Source Files   |
+		// +==============================+
+		StrArray objFiles = EMPTY;
+		for (u64 sIndex = 0; sIndex < sourceFiles.length; sIndex++)
+		{
+			Str sourcePath = sourceFiles.strings[sIndex];
+			Str objPath = JoinStrings2(GetFileNamePart(sourcePath, false), BUILDING_ON_WINDOWS ? StrLit(".obj") : StrLit(".o"));
+			
+			CliArgs args = EMPTY;
+			AddArgStr(&args, CLI_QUOTED_ARG, sourcePath);
+			AddTaggedArg(&args, T_MSVC_CL, CL_COMPILE);
+			AddTaggedArg(&args, T_CLANG, CLANG_COMPILE);
+			AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, objPath);
+			AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, objPath);
+			AddTaggedArgNt(&args, T_MSVC_CL, CL_PDB_FILE, "imgui.pdb");
+			AddArgList(&args, &commonArgs);
+			AddArgStr(&args, LINK_IMPORT_LIBRARY_FILE, imguiLibPath);
+			
+			StrArray tags = EMPTY;
+			if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".c"))) { AddTag(&tags, T_LANG_C); }
+			if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".cpp"))) { AddTag(&tags, T_LANG_CPP); }
+			if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".cc"))) { AddTag(&tags, T_LANG_CPP); }
+			
+			#if BUILDING_ON_WINDOWS
+			AddTag(&tags, T_MSVC_CL);
+			AddTag(&tags, T_MSVC_CL_OR_LINK);
+			AddTag(&tags, T_WINDOWS);
+			InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
+			RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_CL), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(sourcePath), StrPrint(objPath)));
+			AssertFileExist(objPath, true);
+			#else
+			#error The current platform is not supported yet!
+			#endif
+			
+			AddStr(&objFiles, objPath);
+		}
+		
+		// +==============================+
+		// |        Link imgui.lib        |
+		// +==============================+
+		{
+			CliArgs args = EMPTY;
+			AddArg(&args, LINK_BUILD_DLL);
+			for (u64 oIndex = 0; oIndex < objFiles.length; oIndex++)
+			{
+				AddArgStr(&args, CLI_QUOTED_ARG, objFiles.strings[oIndex]);
+			}
+			AddArgStr(&args, LINK_OUTPUT_FILE, imguiDllPath);
+			AddArgStr(&args, LINK_IMPORT_LIBRARY_FILE, imguiLibPath);
+			AddArgList(&args, &commonArgs);
+			
+			StrArray tags = EMPTY;
+			AddTag(&tags, T_LIBRARY);
+			AddTag(&tags, "|imgui_lib");
+			
+			#if BUILDING_ON_WINDOWS
+			AddTag(&tags, T_MSVC_LINK);
+			AddTag(&tags, T_MSVC_CL_OR_LINK);
+			AddTag(&tags, T_WINDOWS);
+			RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_LINK), &tags, &args, FormatStr("Failed to link %.*s", StrPrint(imguiDllPath)));
+			AssertFileExist(imguiDllPath, true);
+			AssertFileExist(imguiLibPath, true);
+			#else
+			#error The current platform is not supported yet!
+			#endif
+		}
+		
+		PrintLine("[Successfully built %.*s!]", StrPrint(imguiDllPath));
+	}
+	
+	// +--------------------------------------------------------------+
 	// |                       Compile Examples                       |
 	// +--------------------------------------------------------------+
 	SappExample exampleDefs[] = {
 		{ .name = "arraytex-sapp",              .hasShader=true },
 		// { .name = "basisu-sapp",                .hasShader=false }, //TODO: Depends on libs/basisu
 		{ .name = "blend-op-sapp",              .hasShader=true },
-		// { .name = "blend-playground-sapp",      .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "blend-playground-sapp",      .hasShader=true, .dependency[0]="cimgui" },
 		{ .name = "blend-sapp",                 .hasShader=true },
 		{ .name = "bufferoffsets-sapp",         .hasShader=true },
 		// { .name = "cgltf-sapp",                 .hasShader=true }, //TODO: Depends on libs/basisu
@@ -270,6 +366,17 @@ int main(int argc, char* argv[])
 		Str shaderHeaderPath = JoinStrings2(exampleName, StrLit(".glsl.h"));
 		Str shaderSrcPath = JoinStrings2(exampleName, def.isCpp ? StrLit(".glsl.cc") : StrLit(".glsl.c"));
 		
+		bool dependsOnImgui = false;
+		bool dependsOnCImgui = false;
+		for (u64 dIndex = 0; dIndex < ArrayCount(def.dependency); dIndex++)
+		{
+			if (def.dependency[dIndex] == nullptr) { continue; }
+			if (strcmp(def.dependency[dIndex], "imgui") == 0) { dependsOnImgui = true; }
+			if (strcmp(def.dependency[dIndex], "cimgui") == 0) { dependsOnCImgui = true; }
+		}
+		Assert(!dependsOnImgui || def.isCpp);
+		Assert(!dependsOnCImgui || !def.isCpp);
+		
 		// +==============================+
 		// |     Cross-Compile Shader     |
 		// +==============================+
@@ -328,11 +435,12 @@ int main(int argc, char* argv[])
 		AddArgStr(&args, CLI_QUOTED_ARG, exampleSrcPath);
 		AddArgStr(&args, CLI_QUOTED_ARG, sokolObjFile);
 		if (def.hasShader) { AddArgStr(&args, CLI_QUOTED_ARG, shaderSrcPath); }
-		// for (u64 oIndex = 0; oIndex < sokolObjFiles.length; oIndex++) { AddArgStr(&args, CLI_QUOTED_ARG, sokolObjFiles.strings[oIndex]); }
+		if (dependsOnImgui || dependsOnCImgui) { AddArgStr(&args, CLI_QUOTED_ARG, imguiLibPath); }
 		AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, exampleBinName);
 		AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, exampleBinName);
 		IF_WINDOWS(AddTaggedArgStr(&args, T_MSVC_CL, CL_PDB_FILE, JoinStrings2(GetFileNamePart(exampleSrcPath, false), StrLit(".pdb"))));
 		AddArgList(&args, &commonArgs);
+		
 		
 		#if ONLY_BUILD_NON_EXISTANT_SAMPLES
 		if (!DoesFileExist(exampleBinName))
@@ -346,8 +454,13 @@ int main(int argc, char* argv[])
 				PrintLine("[Building %.*s for WINDOWS...]", StrPrint(exampleBinName));
 				InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
 				AddTag(&tags, T_MSVC_CL);
+				AddTag(&tags, T_MSVC_CL_OR_LINK);
 				AddTag(&tags, T_WINDOWS);
-				RunCliProgramTagArrayAndExitOnFailure(StrLit("cl"), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(exampleFileName), StrPrint(exampleBinName)));
+				for (u64 dIndex = 0; dIndex < ArrayCount(def.dependency); dIndex++)
+				{
+					if (def.dependency[dIndex] != nullptr) { AddStrNt(&tags, def.dependency[dIndex]); }
+				}
+				RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_CL), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(exampleFileName), StrPrint(exampleBinName)));
 				AssertFileExist(exampleBinName, true);
 				#if COPY_TO_BIN
 				CopyFileToFolder(exampleBinName, StrLit("../bin"), true);
@@ -362,7 +475,7 @@ int main(int argc, char* argv[])
 }
 
 // +--------------------------------------------------------------+
-// |                        Download Sokol                        |
+// |                    Download Dependencies                     |
 // +--------------------------------------------------------------+
 void DownloadSokolIfNeeded()
 {
@@ -410,5 +523,27 @@ void DownloadSokolIfNeeded()
 		AddArgNt(&chmodArgs, CLI_QUOTED_ARG, SHDC_BIN_PATH);
 		RunCliProgramAndExitOnFailure(StrLit("chmod"), "", &chmodArgs, StrLit("Failed to make sokol-shdc executable!"));
 		#endif
+	}
+}
+
+void DownloadDCImguiIfNeeded()
+{
+	// https://github.com/floooh/dcimgui/commit/e2f0e0d93adec02743c55940be23ffe286e857f7
+	// Commit e2f0e0d from May 12th 2026 - "updated (v1.92.8)"
+	Str dcImguiUrl = StrLit("https://github.com/floooh/dcimgui/archive/e2f0e0d93adec02743c55940be23ffe286e857f7.zip");
+	Str dcImguiZipPath = StrLit("dcimgui_v1.92.8.zip");
+	Str dcImguiZipRootFolder = StrLit("dcimgui-e2f0e0d93adec02743c55940be23ffe286e857f7");
+	Str dcImguiFolderPath = StrLit("../dcimgui");
+	if (!DoesFileExist(dcImguiZipPath) || !DoesFolderExist(dcImguiFolderPath))
+	{
+		PrintLine("Downloading dcimgui from \"%.*s\"", StrPrint(dcImguiUrl));
+		// if (DoesFolderExist(dcImguiFolderPath)) { MyRemoveDirectory(dcImguiFolderPath, true); } //TODO: Enable me once MyRemoveDirectory is implemented for OSX/Linux!
+		DownloadAndExtractArchive(
+			dcImguiUrl,
+			dcImguiZipPath,
+			2451561, 0xB32DDA9BCE94A82E,
+			dcImguiFolderPath,
+			dcImguiZipRootFolder
+		);
 	}
 }
