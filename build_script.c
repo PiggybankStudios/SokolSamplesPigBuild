@@ -192,6 +192,7 @@ int main(int argc, char* argv[])
 			AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, objPath);
 			AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, objPath);
 			AddTaggedArgNt(&args, T_MSVC_CL, CL_PDB_FILE, "imgui.pdb");
+			IF_WINDOWS(AddTaggedArgNt(&args, T_MSVC_CL, CL_DEFINE, "CIMGUI_API=__declspec(dllexport)"));
 			AddArgList(&args, &commonArgs);
 			AddArgStr(&args, LINK_IMPORT_LIBRARY_FILE, imguiLibPath);
 			
