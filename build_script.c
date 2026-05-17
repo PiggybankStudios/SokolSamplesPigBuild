@@ -6,10 +6,12 @@ Description:
 	** None
 */
 
-#define PIG_BUILD_PRINT_SYS_CMDS 1
+#define PIG_BUILD_PRINT_SYS_CMDS 0
 #include "pig_build.h"
 
 #define DEBUG_BUILD 1
+#define COPY_TO_BIN 1
+#define ONLY_BUILD_NON_EXISTANT_SAMPLES 0
 
 #if DEBUG_BUILD
 #define IF_DEBUG(...)    __VA_ARGS__
@@ -19,8 +21,28 @@ Description:
 #define IF_RELEASE(...)  __VA_ARGS__
 #endif
 
+#if BUILDING_ON_WINDOWS
+#define SHDC_BIN_PATH "..\\sokol_tools\\bin\\win32\\sokol-shdc.exe"
+#elif BUILDING_ON_LINUX
+#define SHDC_BIN_PATH "../sokol_tools/bin/linux/sokol-shdc"
+#elif BUILDING_ON_OSX_ARM
+#define SHDC_BIN_PATH  "../sokol_tools/bin/osx_arm64/sokol-shdc"
+#elif BUILDING_ON_OSX_INTEL
+#define SHDC_BIN_PATH  "../sokol_tools/bin/osx/sokol-shdc"
+#else
+#error build_script.c SHDC_BIN_PATH needs to be updated to support the current platform!
+#endif
+
+typedef struct SappExample SappExample;
+struct SappExample
+{
+	const char* name;
+	bool isCpp;
+	bool hasShader;
+	bool isComputeShader;
+};
+
 void DownloadSokolIfNeeded();
-void CrossCompileShadersIfNeeded();
 
 int main(int argc, char* argv[])
 {
@@ -29,7 +51,10 @@ int main(int argc, char* argv[])
 	IF_WINDOWS(bool isMsvcInitialized = WasMsvcDevBatchRun());
 	
 	DownloadSokolIfNeeded();
-	CrossCompileShadersIfNeeded();
+	
+	#if COPY_TO_BIN
+	if (!DoesFolderExist(StrLit("../bin"))) { mkdir("../bin", FOLDER_PERMISSIONS); }
+	#endif
 	
 	CliArgs commonArgs = EMPTY;
 	
@@ -38,11 +63,13 @@ int main(int argc, char* argv[])
 	// +==============================+
 	AddTaggedArg(&commonArgs, T_MSVC_CL, CL_FULL_FILE_PATHS);
 	AddTaggedArg(&commonArgs, T_MSVC_CL, CL_NO_LOGO);
-	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_LANG_VERSION, "clatest"); //Use latest C language spec features
-	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_EXPERIMENTAL, "c11atomics"); //Enables _Atomic types
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL T_LANG_C, CL_LANG_VERSION, "clatest"); //Use latest C language spec features
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL T_LANG_C, CL_EXPERIMENTAL, "c11atomics"); //Enables _Atomic types
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL T_LANG_CPP, CL_LANG_VERSION, "c++20");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, ".");
 	// AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/../sokol");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/../sokol/util");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/sapp");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/libs");
 	IF_DEBUG(AddTaggedArg(&commonArgs, T_MSVC_CL, CL_DEBUG_INFO));
@@ -55,10 +82,12 @@ int main(int argc, char* argv[])
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_DEFINE, DEBUG_BUILD ? "DEBUG_BUILD=1" : "DEBUG_BUILD=0");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_OPTIMIZATION_LEVEL, DEBUG_BUILD ? "0" : "2");
 	IF_DEBUG(AddTaggedArg(&commonArgs, T_CLANG, CLANG_DEBUG_INFO_DEFAULT));
-	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_LANG_VERSION, "gnu2x");
+	AddTaggedArgNt(&commonArgs, T_CLANG T_LANG_C, CLANG_LANG_VERSION, "gnu2x");
+	AddTaggedArgNt(&commonArgs, T_CLANG T_LANG_CPP, CLANG_LANG_VERSION, "c++20");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, ".");
 	// AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/../sokol");
+	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/../sokol/util");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/sapp");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/libs");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_OUTPUT_FILE, "sokol_triangle");
@@ -97,52 +126,6 @@ int main(int argc, char* argv[])
 	// +--------------------------------------------------------------+
 	// |                Compile sokol Implementations                 |
 	// +--------------------------------------------------------------+
-	#if 0
-	StrArray sokolHeaderFiles = EMPTY;
-	AddStrLit(&sokolHeaderFiles, "[ROOT]/../sokol/sokol_app.h");
-	AddStrLit(&sokolHeaderFiles, "[ROOT]/../sokol/sokol_gfx.h");
-	AddStrLit(&sokolHeaderFiles, "[ROOT]/../sokol/sokol_log.h");
-	AddStrLit(&sokolHeaderFiles, "[ROOT]/../sokol/sokol_glue.h");
-	
-	StrArray sokolObjFiles = EMPTY;
-	for (u64 sIndex = 0; sIndex < sokolHeaderFiles.length; sIndex++)
-	{
-		Str headerPath = sokolHeaderFiles.strings[sIndex];
-		Str headerFileName = GetFileNamePart(headerPath, true);
-		Str headerFileNameNoExt = GetFileNamePart(headerPath, false);
-		Str srcPath = JoinStrings2(headerFileNameNoExt, StrLit(".c"));
-		Str objPath = JoinStrings2(headerFileNameNoExt, BUILDING_ON_WINDOWS ? StrLit(".obj") : StrLit(".o"));
-		Str pdbPath = JoinStrings2(headerFileNameNoExt, StrLit(".pdb"));
-		
-		if (!DoesFileExist(objPath))
-		{
-			CreateAndWriteFile(srcPath, FormatStr("\n#define SOKOL_IMPL\n#include \"%.*s\"\n", StrPrint(headerFileName)), true);
-			
-			CliArgs args = EMPTY;
-			AddArgStr(&args, CLI_QUOTED_ARG, srcPath);
-			AddTaggedArg(&args, T_MSVC_CL, CL_COMPILE);
-			AddTaggedArg(&args, T_CLANG, CLANG_COMPILE);
-			AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, objPath);
-			AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, objPath);
-			IF_WINDOWS(AddTaggedArgStr(&args, T_MSVC_CL, CL_PDB_FILE, pdbPath));
-			AddArgList(&args, &commonArgs);
-			
-			#if BUILDING_ON_WINDOWS
-			{
-				PrintLine("[Building %.*s for WINDOWS...]", StrPrint(objPath));
-				InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
-				RunCliProgramAndExitOnFailure(StrLit("cl"), T_MSVC_CL T_WINDOWS, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(headerFileName), StrPrint(objPath)));
-				AssertFileExist(objPath, true);
-				PrintLine("[Successfully built %.*s for WINDOWS!]", StrPrint(objPath));
-			}
-			#else
-			#error The current platform is not supported yet!
-			#endif
-		}
-		
-		AddStr(&sokolObjFiles, objPath);
-	}
-	#endif
 	Str sokolObjFile = BUILDING_ON_WINDOWS ? StrLit("sokol.obj") : StrLit("sokol.o");
 	if (!DoesFileExist(sokolObjFile))
 	{
@@ -171,150 +154,216 @@ int main(int argc, char* argv[])
 	// +--------------------------------------------------------------+
 	// |                       Compile Examples                       |
 	// +--------------------------------------------------------------+
-	StrArray examples = EMPTY;
-	// AddStrLit(&examples, "[ROOT]/sapp/arraytex-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/basisu-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/blend-op-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/blend-playground-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/blend-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/bufferoffsets-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/cgltf-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/cimgui-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/clear-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/computeboids-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/cube-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/cubemap-jpeg-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/cubemaprt-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/cursor-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/customresolve-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/debugtext-context-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/debugtext-layers-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/debugtext-printf-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/debugtext-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/debugtext-userfont-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/drawcallperf-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/drawex-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/droptest-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/dyntex-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/dyntex3d-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/events-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/fontstash-layers-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/fontstash-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/framebuffer-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/icon-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/ilbm-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/imageblur-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/imgui-dock-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/imgui-highdpi-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/imgui-images-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/imgui-perf-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/imgui-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/imgui-usercallback-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/instancing-compute-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/instancing-pull-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/instancing-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/layerrender-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/letterbox-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/loadpng-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/mipmap-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/miprender-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/modplay-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/mrt-pixelformats-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/mrt-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/noentry-dll-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/noentry-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/noninterleaved-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/nuklear-images-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/nuklear-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/offscreen-msaa-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/offscreen-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/ozz-anim-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/ozz-skin-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/ozz-storagebuffer-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/pixelformats-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/plmpeg-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/primtypes-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/quad-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/restart-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/saudio-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/sbufoffset-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/sbuftex-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/sdf-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/sgl-context-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/sgl-lines-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/sgl-microui-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/sgl-points-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/sgl-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/shadows-depthtex-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/shadows-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/shapes-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/shapes-transform-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/shared-bindings-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/shdfeatures-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/spine-contexts-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/spine-inspector-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/spine-layers-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/spine-simple-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/spine-skinsets-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/spine-switch-skinsets-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/tex3d-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/texcube-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/texview-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/triangle-bufferless-sapp.c");
-	AddStrLit(&examples, "[ROOT]/sapp/triangle-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/uniformtypes-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/uvwrap-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/vertexindexbuffer-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/vertexpull-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/vertextexture-sapp.c");
-	// AddStrLit(&examples, "[ROOT]/sapp/write-storageimage-sapp.c");
+	SappExample exampleDefs[] = {
+		{ .name = "arraytex-sapp",              .hasShader=true },
+		// { .name = "basisu-sapp",                .hasShader=false }, //TODO: Depends on libs/basisu
+		{ .name = "blend-op-sapp",              .hasShader=true },
+		// { .name = "blend-playground-sapp",      .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "blend-sapp",                 .hasShader=true },
+		{ .name = "bufferoffsets-sapp",         .hasShader=true },
+		// { .name = "cgltf-sapp",                 .hasShader=true }, //TODO: Depends on libs/basisu
+		// { .name = "cimgui-sapp",                .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "clear-sapp",                 .hasShader=false },
+		// { .name = "computeboids-sapp",          .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "cube-sapp",                  .hasShader=true },
+		// { .name = "cubemap-jpeg-sapp",          .hasShader=true }, //TODO: Depends on stb_image.h?
+		{ .name = "cubemaprt-sapp",             .hasShader=true },
+		// { .name = "cursor-sapp",                .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
+		// { .name = "customresolve-sapp",         .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "debugtext-context-sapp",     .hasShader=true },
+		{ .name = "debugtext-layers-sapp",      .hasShader=false },
+		{ .name = "debugtext-printf-sapp",      .hasShader=false },
+		{ .name = "debugtext-sapp",             .hasShader=false },
+		{ .name = "debugtext-userfont-sapp",    .hasShader=false },
+		// { .name = "drawcallperf-sapp",          .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "drawex-sapp",                .hasShader=true },
+		// { .name = "droptest-sapp",              .hasShader=false }, //TODO: Depends on libs/cimgui
+		{ .name = "dyntex-sapp",                .hasShader=true },
+		// { .name = "dyntex3d-sapp",              .hasShader=true }, //TODO: Depends on libs/cimgui
+		// { .name = "events-sapp",                .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
+		// { .name = "fontstash-layers-sapp",      .hasShader=true }, //TODO: Depends on libs/util/fileutil
+		// { .name = "fontstash-sapp",             .hasShader=false }, //TODO: Depends on libs/utils/fileutil
+		{ .name = "framebuffer-sapp",           .hasShader=false },
+		{ .name = "icon-sapp",                  .hasShader=false },
+		// { .name = "ilbm-sapp",                  .hasShader=false }, //TODO: Depends on libs/cimgui
+		// { .name = "imageblur-sapp",             .hasShader=true, .isComputeShader=true }, //TODO: Depends on libs/cimgui
+		// { .name = "imgui-dock-sapp",            .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
+		// { .name = "imgui-highdpi-sapp",         .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
+		// { .name = "imgui-images-sapp",          .hasShader=false }, //TODO: Depends on libs/cimgui
+		// { .name = "imgui-perf-sapp",            .hasShader=false }, //TODO: Depends on libs/cimgui
+		// { .name = "imgui-sapp",                 .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
+		// { .name = "imgui-usercallback-sapp",    .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "instancing-compute-sapp",    .hasShader=true, .isComputeShader=true },
+		{ .name = "instancing-pull-sapp",       .hasShader=true },
+		{ .name = "instancing-sapp",            .hasShader=true },
+		{ .name = "layerrender-sapp",           .hasShader=true },
+		// { .name = "letterbox-sapp",             .hasShader=false }, //TODO: Depends on libs/cimgui
+		// { .name = "loadpng-sapp",               .hasShader=true }, //TODO: Depends on stb_image.h?
+		{ .name = "mipmap-sapp",                .hasShader=true },
+		{ .name = "miprender-sapp",             .hasShader=true },
+		// { .name = "modplay-sapp",               .hasShader=false }, //TODO: Depends on modplug.h
+		{ .name = "mrt-pixelformats-sapp",      .hasShader=true },
+		{ .name = "mrt-sapp",                   .hasShader=true },
+		// { .name = "noentry-dll-sapp",           .hasShader=true }, //TODO: Depends on sokol.dll
+		// { .name = "noentry-sapp",               .hasShader=true }, //TODO: Depends on noentry version of sokol_app.h
+		{ .name = "noninterleaved-sapp",        .hasShader=true },
+		// { .name = "nuklear-images-sapp",        .hasShader=false }, //TODO: Depends on libs/nuklear
+		// { .name = "nuklear-sapp",               .hasShader=false }, //TODO: Depends on libs/nuklear
+		{ .name = "offscreen-msaa-sapp",        .hasShader=true },
+		{ .name = "offscreen-sapp",             .hasShader=true },
+		// { .name = "ozz-anim-sapp",              .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
+		// { .name = "ozz-skin-sapp",              .hasShader=true, .isCpp=true }, //TODO: Depends on libs/imgui
+		// { .name = "ozz-storagebuffer-sapp",     .hasShader=true, .isCpp=true }, //TODO: Depends on libs/imgui
+		// { .name = "pixelformats-sapp",          .hasShader=true }, //TODO: Depends on libs/cimgui
+		// { .name = "plmpeg-sapp",                .hasShader=true }, //TODO: Depends on libs/utils/fileutil
+		{ .name = "primtypes-sapp",             .hasShader=true },
+		{ .name = "quad-sapp",                  .hasShader=true },
+		// { .name = "restart-sapp",               .hasShader=true }, //TODO: Depends on modplug.h
+		{ .name = "saudio-sapp",                .hasShader=false },
+		{ .name = "sbufoffset-sapp",            .hasShader=true, .isComputeShader=true },
+		{ .name = "sbuftex-sapp",               .hasShader=true },
+		{ .name = "sdf-sapp",                   .hasShader=true },
+		{ .name = "sgl-context-sapp",           .hasShader=false },
+		{ .name = "sgl-lines-sapp",             .hasShader=false },
+		// { .name = "sgl-microui-sapp",           .hasShader=false }, //TODO: Depends on microui.h
+		{ .name = "sgl-points-sapp",            .hasShader=false },
+		{ .name = "sgl-sapp",                   .hasShader=false },
+		{ .name = "shadows-depthtex-sapp",      .hasShader=true },
+		{ .name = "shadows-sapp",               .hasShader=true },
+		{ .name = "shapes-sapp",                .hasShader=true },
+		{ .name = "shapes-transform-sapp",      .hasShader=true },
+		{ .name = "shared-bindings-sapp",       .hasShader=true },
+		// { .name = "shdfeatures-sapp",           .hasShader=true }, //TODO: Depends on libs/cimgui
+		// { .name = "spine-contexts-sapp",        .hasShader=false }, //TODO: Depends on spine.h
+		// { .name = "spine-inspector-sapp",       .hasShader=false }, //TODO: Depends on spine.h
+		// { .name = "spine-layers-sapp",          .hasShader=false }, //TODO: Depends on spine.h
+		// { .name = "spine-simple-sapp",          .hasShader=false }, //TODO: Depends on spine.h
+		// { .name = "spine-skinsets-sapp",        .hasShader=false }, //TODO: Depends on spine.h
+		// { .name = "spine-switch-skinsets-sapp", .hasShader=false }, //TODO: Depends on spine.h
+		{ .name = "tex3d-sapp",                 .hasShader=true },
+		{ .name = "texcube-sapp",               .hasShader=true },
+		// { .name = "texview-sapp",               .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "triangle-bufferless-sapp",   .hasShader=true },
+		{ .name = "triangle-sapp",              .hasShader=true },
+		{ .name = "uniformtypes-sapp",          .hasShader=true },
+		{ .name = "uvwrap-sapp",                .hasShader=true },
+		{ .name = "vertexindexbuffer-sapp",     .hasShader=true },
+		{ .name = "vertexpull-sapp",            .hasShader=true },
+		{ .name = "vertextexture-sapp",         .hasShader=true, .isComputeShader=true },
+		{ .name = "write-storageimage-sapp",    .hasShader=true, .isComputeShader=true },
+	};
 	
-	for (u64 eIndex = 0; eIndex < examples.length; eIndex++)
+	for (u64 eIndex = 0; eIndex < ArrayCount(exampleDefs); eIndex++)
 	{
-		Str exampleSrcPath = examples.strings[eIndex];
-		Str exampleFileName = GetFileNamePart(exampleSrcPath, true);
+		SappExample def = exampleDefs[eIndex];
+		Str exampleName = MakeStrNt(def.name);
+		Str exampleFileName = JoinStrings2(exampleName, def.isCpp ? StrLit(".cc") : StrLit(".c"));
+		Str exampleSrcPath = JoinStrings2(StrLit("[ROOT]/sapp/"), exampleFileName);
 		#if BUILDING_ON_WINDOWS
-		Str exampleBinName = JoinStrings2(GetFileNamePart(exampleSrcPath, false), StrLit(".exe"));
+		Str exampleBinName = JoinStrings2(exampleName, StrLit(".exe"));
 		#else
-		Str exampleBinName = GetFileNamePart(exampleSrcPath, false);
+		Str exampleBinName = exampleName;
 		#endif
 		StrReplaceChars(exampleBinName, '-', '_');
+		Str shaderFileName = JoinStrings2(exampleName, StrLit(".glsl"));
+		Str shaderFilePath = JoinStrings2(StrLit("[ROOT]/sapp/"), shaderFileName);
+		Str shaderHeaderPath = JoinStrings2(exampleName, StrLit(".glsl.h"));
+		Str shaderSrcPath = JoinStrings2(exampleName, def.isCpp ? StrLit(".glsl.cc") : StrLit(".glsl.c"));
 		
+		// +==============================+
+		// |     Cross-Compile Shader     |
+		// +==============================+
+		if (def.hasShader)
+		{
+			AssertFileExist(StrReplace(shaderFilePath, StrLit("[ROOT]"), StrLit("..")), false);
+			if (!DoesFileExist(shaderHeaderPath))
+			{
+				PrintLine("Cross-compiling %.*s using sokol-shdc...", StrPrint(shaderFileName));
+				
+				CliArgs shdcArgs = EMPTY;
+				AddArgNt(&shdcArgs, SHDC_FORMAT, "sokol_impl");
+				AddArgNt(&shdcArgs, SHDC_ERROR_FORMAT, "msvc");
+				// AddArg(&shdcArgs, SHDC_REFLECTION);
+				if (def.isComputeShader)
+				{
+					AddArgNt(&shdcArgs, SHDC_SHADER_LANGUAGES, "hlsl5:glsl430:metal_macos");
+				}
+				else
+				{
+					AddArgNt(&shdcArgs, SHDC_SHADER_LANGUAGES, "hlsl5:glsl430:glsl300es:metal_macos");
+				}
+				AddArgStr(&shdcArgs, SHDC_INPUT, shaderFilePath);
+				AddArgStr(&shdcArgs, SHDC_OUTPUT, shaderHeaderPath);
+				
+				int exitCode = RunCliProgram(StrLit(SHDC_BIN_PATH), "", &shdcArgs);
+				if (exitCode != 0)
+				{
+					PrintLine("Failed to cross-compile %.*s using sokol-shdc! Exit code: %d", StrPrint(shaderFileName), exitCode);
+				}
+				else
+				{
+					AssertFileExist(shaderHeaderPath, true);
+					PrintLine("Successfully cross-compiled %.*s!", StrPrint(shaderFileName));
+				}
+			}
+			
+			if (!DoesFileExist(shaderSrcPath))
+			{
+				PrintLine("Creating %.*s", StrPrint(shaderSrcPath));
+				Str cCode = FormatStr("\n"
+					"#include \"sokol_gfx.h\"\n"
+					"#include \"vecmath/vecmath.h\"\n"
+					"#define SOKOL_SHDC_IMPL\n"
+					"#include \"%.*s\"",
+					StrPrint(shaderHeaderPath)
+				);
+				CreateAndWriteFile(shaderSrcPath, cCode, true);
+			}
+		}
+		
+		// +==============================+
+		// |        Build Example         |
+		// +==============================+
 		CliArgs args = EMPTY;
 		AddArgStr(&args, CLI_QUOTED_ARG, exampleSrcPath);
 		AddArgStr(&args, CLI_QUOTED_ARG, sokolObjFile);
+		if (def.hasShader) { AddArgStr(&args, CLI_QUOTED_ARG, shaderSrcPath); }
 		// for (u64 oIndex = 0; oIndex < sokolObjFiles.length; oIndex++) { AddArgStr(&args, CLI_QUOTED_ARG, sokolObjFiles.strings[oIndex]); }
 		AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, exampleBinName);
 		AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, exampleBinName);
 		IF_WINDOWS(AddTaggedArgStr(&args, T_MSVC_CL, CL_PDB_FILE, JoinStrings2(GetFileNamePart(exampleSrcPath, false), StrLit(".pdb"))));
 		AddArgList(&args, &commonArgs);
 		
-		#if BUILDING_ON_WINDOWS
-		{
-			PrintLine("[Building %.*s for WINDOWS...]", StrPrint(exampleBinName));
-			InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
-			RunCliProgramAndExitOnFailure(StrLit("cl"), T_MSVC_CL T_WINDOWS, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(exampleFileName), StrPrint(exampleBinName)));
-			AssertFileExist(exampleBinName, true);
-			PrintLine("[Successfully built %.*s for WINDOWS!]", StrPrint(exampleBinName));
-		}
-		#else
-		#error The current platform is not supported yet!
+		#if ONLY_BUILD_NON_EXISTANT_SAMPLES
+		if (!DoesFileExist(exampleBinName))
 		#endif
+		{
+			StrArray tags = EMPTY;
+			if (def.isCpp) { AddTag(&tags, T_LANG_CPP); }
+			else { AddTag(&tags, T_LANG_C); }
+			#if BUILDING_ON_WINDOWS
+			{
+				PrintLine("[Building %.*s for WINDOWS...]", StrPrint(exampleBinName));
+				InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
+				AddTag(&tags, T_MSVC_CL);
+				AddTag(&tags, T_WINDOWS);
+				RunCliProgramTagArrayAndExitOnFailure(StrLit("cl"), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(exampleFileName), StrPrint(exampleBinName)));
+				AssertFileExist(exampleBinName, true);
+				#if COPY_TO_BIN
+				CopyFileToFolder(exampleBinName, StrLit("../bin"), true);
+				#endif
+				PrintLine("[Successfully built %.*s for WINDOWS!]", StrPrint(exampleBinName));
+			}
+			#else
+			#error The current platform is not supported yet!
+			#endif
+		}
 	}
 }
 
-#if BUILDING_ON_WINDOWS
-#define SHDC_BIN_PATH "..\\sokol_tools\\bin\\win32\\sokol-shdc.exe"
-#elif BUILDING_ON_LINUX
-#define SHDC_BIN_PATH "../sokol_tools/bin/linux/sokol-shdc"
-#elif BUILDING_ON_OSX_ARM
-#define SHDC_BIN_PATH  "../sokol_tools/bin/osx_arm64/sokol-shdc"
-#elif BUILDING_ON_OSX_INTEL
-#define SHDC_BIN_PATH  "../sokol_tools/bin/osx/sokol-shdc"
-#else
-#error build_script.c SHDC_BIN_PATH needs to be updated to support the current platform!
-#endif
-
+// +--------------------------------------------------------------+
+// |                        Download Sokol                        |
+// +--------------------------------------------------------------+
 void DownloadSokolIfNeeded()
 {
 	// https://github.com/floooh/sokol/commit/453c71214fbb55d782683d20ea7e6c07314e3e9b
@@ -361,47 +410,5 @@ void DownloadSokolIfNeeded()
 		AddArgNt(&chmodArgs, CLI_QUOTED_ARG, SHDC_BIN_PATH);
 		RunCliProgramAndExitOnFailure(StrLit("chmod"), "", &chmodArgs, StrLit("Failed to make sokol-shdc executable!"));
 		#endif
-	}
-}
-
-void CrossCompileShadersIfNeeded()
-{
-	FileIter sappFolderIter = StartFileIter(StrLit("../sapp"));
-	bool isFolder = false;
-	Str filePath = Str_Empty_Const;
-	while (StepFileIter(&sappFolderIter, &filePath, &isFolder))
-	{
-		if (!isFolder && StrAnyCaseEquals(GetFileExtPart(filePath, false), StrLit(".glsl")))
-		{
-			FixPathSlashes(filePath, '/');
-			Str shaderSrcPath = filePath;
-			Str shaderFileName = GetFileNamePart(shaderSrcPath, true);
-			Str shaderHeaderPath = GetFileNamePart(shaderSrcPath, true);
-			shaderHeaderPath = JoinStrings2(shaderHeaderPath, StrLit(".h"));
-			
-			if (!DoesFileExist(shaderHeaderPath))
-			{
-				PrintLine("Cross-compiling %.*s using sokol-shdc...", StrPrint(shaderFileName));
-				
-				CliArgs shdcArgs = EMPTY;
-				AddArgNt(&shdcArgs, SHDC_FORMAT, "sokol_impl");
-				AddArgNt(&shdcArgs, SHDC_ERROR_FORMAT, "msvc");
-				// AddArg(&shdcArgs, SHDC_REFLECTION);
-				AddArgNt(&shdcArgs, SHDC_SHADER_LANGUAGES, "hlsl5:glsl430:glsl300es:metal_macos");
-				AddArgStr(&shdcArgs, SHDC_INPUT, shaderSrcPath);
-				AddArgStr(&shdcArgs, SHDC_OUTPUT, shaderHeaderPath);
-				
-				int exitCode = RunCliProgram(StrLit(SHDC_BIN_PATH), "", &shdcArgs);
-				if (exitCode != 0)
-				{
-					PrintLine("Failed to cross-compile %.*s using sokol-shdc! Exit code: %d", StrPrint(shaderFileName), exitCode);
-				}
-				else
-				{
-					AssertFileExist(shaderHeaderPath, true);
-					PrintLine("Successfully cross-compiled %.*s!", StrPrint(shaderFileName));
-				}
-			}
-		}
 	}
 }
