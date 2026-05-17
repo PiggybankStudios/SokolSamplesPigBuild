@@ -33,6 +33,7 @@ Description:
 #error build_script.c SHDC_BIN_PATH needs to be updated to support the current platform!
 #endif
 
+#define MAX_DEPENDENCIES  4
 typedef struct SappExample SappExample;
 struct SappExample
 {
@@ -40,11 +41,12 @@ struct SappExample
 	bool isCpp;
 	bool hasShader;
 	bool isComputeShader;
-	const char* dependency[4];
+	const char* dependencies[MAX_DEPENDENCIES];
 };
 
 void DownloadSokolIfNeeded();
 void DownloadDCImguiIfNeeded();
+void DownloadNuklearIfNeeded();
 
 int main(int argc, char* argv[])
 {
@@ -54,6 +56,7 @@ int main(int argc, char* argv[])
 	
 	DownloadSokolIfNeeded();
 	DownloadDCImguiIfNeeded();
+	// DownloadNuklearIfNeeded(); //TODO: Re-enable me once we have nuklear fully compiling/linking
 	
 	#if COPY_TO_BIN
 	if (!DoesFolderExist(StrLit("../bin"))) { mkdir("../bin", FOLDER_PERMISSIONS); }
@@ -76,6 +79,7 @@ int main(int argc, char* argv[])
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/sapp");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/libs");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|imgui", CL_INCLUDE_DIR, "[ROOT]/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|imgui-docking", CL_INCLUDE_DIR, "[ROOT]/dcimgui/src-docking");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|cimgui", CL_INCLUDE_DIR, "[ROOT]/dcimgui/src");
 	IF_DEBUG(AddTaggedArg(&commonArgs, T_MSVC_CL, CL_DEBUG_INFO));
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_OPTIMIZATION_LEVEL, DEBUG_BUILD ? "d" : "2");
@@ -96,6 +100,7 @@ int main(int argc, char* argv[])
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/sapp");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/libs");
 	AddTaggedArgNt(&commonArgs, T_CLANG "|imgui", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|imgui-docking", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src-docking");
 	AddTaggedArgNt(&commonArgs, T_CLANG "|cimgui", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_OUTPUT_FILE, "sokol_triangle");
 	AddTaggedArgNt(&commonArgs, T_CLANG T_OSX "==false", CLI_QUOTED_ARG, "[ROOT]/main.c");
@@ -164,137 +169,149 @@ int main(int argc, char* argv[])
 	// +--------------------------------------------------------------+
 	Str imguiLibPath = StrLit("imgui.lib");
 	Str imguiDllPath = StrLit("imgui.dll");
-	if (!DoesFileExist(imguiDllPath) || !DoesFileExist(imguiLibPath))
+	Str imguiDockingLibPath = StrLit("imgui_docking.lib");
+	Str imguiDockingDllPath = StrLit("imgui_docking.dll");
+	for (u64 dockingEnabled = 0; dockingEnabled < 2; dockingEnabled++)
 	{
-		PrintLine("[Building %.*s...]", StrPrint(imguiDllPath));
-		StrArray sourceFiles = EMPTY;
-		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/cimgui.cpp");
-		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/cimgui_internal.cpp");
-		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui_demo.cpp");
-		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui_draw.cpp");
-		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui_tables.cpp");
-		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui_widgets.cpp");
-		AddStrLit(&sourceFiles, "[ROOT]/dcimgui/src/imgui.cpp");
-		
-		// +==============================+
-		// |   Build Imgui Source Files   |
-		// +==============================+
-		StrArray objFiles = EMPTY;
-		for (u64 sIndex = 0; sIndex < sourceFiles.length; sIndex++)
+		Str libPath = (dockingEnabled ? imguiDockingLibPath : imguiLibPath);
+		Str dllPath = (dockingEnabled ? imguiDockingDllPath : imguiDllPath);
+		if (!DoesFileExist(dllPath) || !DoesFileExist(libPath))
 		{
-			Str sourcePath = sourceFiles.strings[sIndex];
-			Str objPath = JoinStrings2(GetFileNamePart(sourcePath, false), BUILDING_ON_WINDOWS ? StrLit(".obj") : StrLit(".o"));
+			PrintLine("[Building %.*s...]", StrPrint(dllPath));
+			StrArray sourceFiles = EMPTY;
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/cimgui.cpp"          : "[ROOT]/dcimgui/src/cimgui.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/cimgui_internal.cpp" : "[ROOT]/dcimgui/src/cimgui_internal.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui_demo.cpp"      : "[ROOT]/dcimgui/src/imgui_demo.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui_draw.cpp"      : "[ROOT]/dcimgui/src/imgui_draw.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui_tables.cpp"    : "[ROOT]/dcimgui/src/imgui_tables.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui_widgets.cpp"   : "[ROOT]/dcimgui/src/imgui_widgets.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui.cpp"           : "[ROOT]/dcimgui/src/imgui.cpp");
 			
-			CliArgs args = EMPTY;
-			AddArgStr(&args, CLI_QUOTED_ARG, sourcePath);
-			AddTaggedArg(&args, T_MSVC_CL, CL_COMPILE);
-			AddTaggedArg(&args, T_CLANG, CLANG_COMPILE);
-			AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, objPath);
-			AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, objPath);
-			AddTaggedArgNt(&args, T_MSVC_CL, CL_PDB_FILE, "imgui.pdb");
-			IF_WINDOWS(AddTaggedArgNt(&args, T_MSVC_CL, CL_DEFINE, "CIMGUI_API=__declspec(dllexport)"));
-			AddArgList(&args, &commonArgs);
-			AddArgStr(&args, LINK_IMPORT_LIBRARY_FILE, imguiLibPath);
-			
-			StrArray tags = EMPTY;
-			if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".c"))) { AddTag(&tags, T_LANG_C); }
-			if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".cpp"))) { AddTag(&tags, T_LANG_CPP); }
-			if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".cc"))) { AddTag(&tags, T_LANG_CPP); }
-			
-			#if BUILDING_ON_WINDOWS
-			AddTag(&tags, T_MSVC_CL);
-			AddTag(&tags, T_MSVC_CL_OR_LINK);
-			AddTag(&tags, T_WINDOWS);
-			InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
-			RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_CL), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(sourcePath), StrPrint(objPath)));
-			AssertFileExist(objPath, true);
-			#else
-			#error The current platform is not supported yet!
-			#endif
-			
-			AddStr(&objFiles, objPath);
-		}
-		
-		// +==============================+
-		// |        Link imgui.lib        |
-		// +==============================+
-		{
-			CliArgs args = EMPTY;
-			AddArg(&args, LINK_BUILD_DLL);
-			for (u64 oIndex = 0; oIndex < objFiles.length; oIndex++)
+			// +==============================+
+			// |   Build Imgui Source Files   |
+			// +==============================+
+			StrArray objFiles = EMPTY;
+			for (u64 sIndex = 0; sIndex < sourceFiles.length; sIndex++)
 			{
-				AddArgStr(&args, CLI_QUOTED_ARG, objFiles.strings[oIndex]);
+				Str sourcePath = sourceFiles.strings[sIndex];
+				Str objPath = JoinStrings2(GetFileNamePart(sourcePath, false), BUILDING_ON_WINDOWS ? StrLit(".obj") : StrLit(".o"));
+				
+				CliArgs args = EMPTY;
+				AddArgStr(&args, CLI_QUOTED_ARG, sourcePath);
+				AddTaggedArg(&args, T_MSVC_CL, CL_COMPILE);
+				AddTaggedArg(&args, T_CLANG, CLANG_COMPILE);
+				AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, objPath);
+				AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, objPath);
+				AddTaggedArgNt(&args, T_MSVC_CL, CL_PDB_FILE, "imgui.pdb");
+				IF_WINDOWS(AddTaggedArgNt(&args, T_MSVC_CL, CL_DEFINE, "CIMGUI_API=__declspec(dllexport)"));
+				IF_WINDOWS(AddTaggedArgNt(&args, T_MSVC_CL, CL_DEFINE, "IMGUI_API=__declspec(dllexport)"));
+				AddArgList(&args, &commonArgs);
+				AddArgStr(&args, LINK_IMPORT_LIBRARY_FILE, libPath);
+				
+				StrArray tags = EMPTY;
+				if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".c"))) { AddTag(&tags, T_LANG_C); }
+				if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".cpp"))) { AddTag(&tags, T_LANG_CPP); }
+				if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".cc"))) { AddTag(&tags, T_LANG_CPP); }
+				
+				#if BUILDING_ON_WINDOWS
+				AddTag(&tags, T_MSVC_CL);
+				AddTag(&tags, T_MSVC_CL_OR_LINK);
+				AddTag(&tags, T_WINDOWS);
+				InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
+				RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_CL), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(sourcePath), StrPrint(objPath)));
+				AssertFileExist(objPath, true);
+				#else
+				#error The current platform is not supported yet!
+				#endif
+				
+				AddStr(&objFiles, objPath);
 			}
-			AddArgStr(&args, LINK_OUTPUT_FILE, imguiDllPath);
-			AddArgStr(&args, LINK_IMPORT_LIBRARY_FILE, imguiLibPath);
-			AddArgList(&args, &commonArgs);
 			
-			StrArray tags = EMPTY;
-			AddTag(&tags, T_LIBRARY);
-			AddTag(&tags, "|imgui_lib");
+			// +==============================+
+			// |        Link imgui.lib        |
+			// +==============================+
+			{
+				CliArgs args = EMPTY;
+				AddArg(&args, LINK_BUILD_DLL);
+				for (u64 oIndex = 0; oIndex < objFiles.length; oIndex++)
+				{
+					AddArgStr(&args, CLI_QUOTED_ARG, objFiles.strings[oIndex]);
+				}
+				AddArgStr(&args, LINK_OUTPUT_FILE, dllPath);
+				AddArgStr(&args, LINK_IMPORT_LIBRARY_FILE, libPath);
+				AddArgList(&args, &commonArgs);
+				
+				StrArray tags = EMPTY;
+				AddTag(&tags, T_LIBRARY);
+				AddTag(&tags, "|imgui_lib");
+				
+				#if BUILDING_ON_WINDOWS
+				AddTag(&tags, T_MSVC_LINK);
+				AddTag(&tags, T_MSVC_CL_OR_LINK);
+				AddTag(&tags, T_WINDOWS);
+				RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_LINK), &tags, &args, FormatStr("Failed to link %.*s", StrPrint(dllPath)));
+				AssertFileExist(dllPath, true);
+				AssertFileExist(libPath, true);
+				#else
+				#error The current platform is not supported yet!
+				#endif
+			}
 			
-			#if BUILDING_ON_WINDOWS
-			AddTag(&tags, T_MSVC_LINK);
-			AddTag(&tags, T_MSVC_CL_OR_LINK);
-			AddTag(&tags, T_WINDOWS);
-			RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_LINK), &tags, &args, FormatStr("Failed to link %.*s", StrPrint(imguiDllPath)));
-			AssertFileExist(imguiDllPath, true);
-			AssertFileExist(imguiLibPath, true);
-			#else
-			#error The current platform is not supported yet!
-			#endif
+			PrintLine("[Successfully built %.*s!]", StrPrint(dllPath));
 		}
-		
-		PrintLine("[Successfully built %.*s!]", StrPrint(imguiDllPath));
 	}
+	#if COPY_TO_BIN
+	CopyFileToFolder(imguiDllPath, StrLit("../bin"), true);
+	CopyFileToFolder(imguiDockingDllPath, StrLit("../bin"), true);
+	#endif
 	
 	// +--------------------------------------------------------------+
 	// |                       Compile Examples                       |
 	// +--------------------------------------------------------------+
 	SappExample exampleDefs[] = {
 		{ .name = "arraytex-sapp",              .hasShader=true },
-		// { .name = "basisu-sapp",                .hasShader=false }, //TODO: Depends on libs/basisu
+		{ .name = "basisu-sapp",                .hasShader=false, .dependencies={ "basisu" } },
 		{ .name = "blend-op-sapp",              .hasShader=true },
-		{ .name = "blend-playground-sapp",      .hasShader=true, .dependency[0]="cimgui" },
+		{ .name = "blend-playground-sapp",      .hasShader=true, .dependencies={ "cimgui", "fileutil", "qoi" } },
 		{ .name = "blend-sapp",                 .hasShader=true },
 		{ .name = "bufferoffsets-sapp",         .hasShader=true },
-		// { .name = "cgltf-sapp",                 .hasShader=true }, //TODO: Depends on libs/basisu
-		// { .name = "cimgui-sapp",                .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "cgltf-sapp",                 .hasShader=true, .dependencies={ "basisu", "fileutil" } },
+		{ .name = "cimgui-sapp",                .hasShader=false, .dependencies={ "cimgui" } },
 		{ .name = "clear-sapp",                 .hasShader=false },
-		// { .name = "computeboids-sapp",          .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "computeboids-sapp",          .hasShader=true, .isComputeShader=true, .dependencies={ "cimgui" } },
 		{ .name = "cube-sapp",                  .hasShader=true },
 		// { .name = "cubemap-jpeg-sapp",          .hasShader=true }, //TODO: Depends on stb_image.h?
 		{ .name = "cubemaprt-sapp",             .hasShader=true },
-		// { .name = "cursor-sapp",                .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
-		// { .name = "customresolve-sapp",         .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "cursor-sapp",                .hasShader=false, .isCpp=true, .dependencies={ "imgui" } },
+		{ .name = "customresolve-sapp",         .hasShader=true, .dependencies={ "cimgui" } },
 		{ .name = "debugtext-context-sapp",     .hasShader=true },
 		{ .name = "debugtext-layers-sapp",      .hasShader=false },
 		{ .name = "debugtext-printf-sapp",      .hasShader=false },
 		{ .name = "debugtext-sapp",             .hasShader=false },
 		{ .name = "debugtext-userfont-sapp",    .hasShader=false },
-		// { .name = "drawcallperf-sapp",          .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "drawcallperf-sapp",          .hasShader=true, .dependencies={ "cimgui" } },
 		{ .name = "drawex-sapp",                .hasShader=true },
-		// { .name = "droptest-sapp",              .hasShader=false }, //TODO: Depends on libs/cimgui
+		{ .name = "droptest-sapp",              .hasShader=false, .dependencies={ "cimgui" } },
 		{ .name = "dyntex-sapp",                .hasShader=true },
-		// { .name = "dyntex3d-sapp",              .hasShader=true }, //TODO: Depends on libs/cimgui
-		// { .name = "events-sapp",                .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
-		// { .name = "fontstash-layers-sapp",      .hasShader=true }, //TODO: Depends on libs/util/fileutil
-		// { .name = "fontstash-sapp",             .hasShader=false }, //TODO: Depends on libs/utils/fileutil
+		{ .name = "dyntex3d-sapp",              .hasShader=true, .dependencies={ "cimgui" } },
+		{ .name = "events-sapp",                .hasShader=false, .isCpp=true, .dependencies={ "imgui" } },
+		{ .name = "fontstash-layers-sapp",      .hasShader=true, .dependencies={ "fileutil" } },
+		{ .name = "fontstash-sapp",             .hasShader=false, .dependencies={ "fileutil" } },
 		{ .name = "framebuffer-sapp",           .hasShader=false },
 		{ .name = "icon-sapp",                  .hasShader=false },
-		// { .name = "ilbm-sapp",                  .hasShader=false }, //TODO: Depends on libs/cimgui
-		// { .name = "imageblur-sapp",             .hasShader=true, .isComputeShader=true }, //TODO: Depends on libs/cimgui
-		// { .name = "imgui-dock-sapp",            .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
-		// { .name = "imgui-highdpi-sapp",         .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
-		// { .name = "imgui-images-sapp",          .hasShader=false }, //TODO: Depends on libs/cimgui
-		// { .name = "imgui-perf-sapp",            .hasShader=false }, //TODO: Depends on libs/cimgui
-		// { .name = "imgui-sapp",                 .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
-		// { .name = "imgui-usercallback-sapp",    .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "ilbm-sapp",                  .hasShader=false, .dependencies={ "cimgui", "ilbm", "fileutil" } },
+		// { .name = "imageblur-sapp",             .hasShader=true, .isComputeShader=true, .dependencies={ "cimgui" } }, //TODO: Depends on stb_image.h?
+		{ .name = "imgui-dock-sapp",            .hasShader=false, .isCpp=true, .dependencies={ "imgui-docking" } },
+		{ .name = "imgui-highdpi-sapp",         .hasShader=false, .isCpp=true, .dependencies={ "imgui" } },
+		{ .name = "imgui-images-sapp",          .hasShader=false, .dependencies={ "cimgui" } },
+		{ .name = "imgui-perf-sapp",            .hasShader=false, .dependencies={ "cimgui" } },
+		{ .name = "imgui-sapp",                 .hasShader=false, .isCpp=true, .dependencies={ "imgui" } },
+		{ .name = "imgui-usercallback-sapp",    .hasShader=true, .dependencies={ "cimgui" } },
 		{ .name = "instancing-compute-sapp",    .hasShader=true, .isComputeShader=true },
 		{ .name = "instancing-pull-sapp",       .hasShader=true },
 		{ .name = "instancing-sapp",            .hasShader=true },
 		{ .name = "layerrender-sapp",           .hasShader=true },
-		// { .name = "letterbox-sapp",             .hasShader=false }, //TODO: Depends on libs/cimgui
+		{ .name = "letterbox-sapp",             .hasShader=false, .dependencies={ "cimgui" } },
 		// { .name = "loadpng-sapp",               .hasShader=true }, //TODO: Depends on stb_image.h?
 		{ .name = "mipmap-sapp",                .hasShader=true },
 		{ .name = "miprender-sapp",             .hasShader=true },
@@ -304,15 +321,15 @@ int main(int argc, char* argv[])
 		// { .name = "noentry-dll-sapp",           .hasShader=true }, //TODO: Depends on sokol.dll
 		// { .name = "noentry-sapp",               .hasShader=true }, //TODO: Depends on noentry version of sokol_app.h
 		{ .name = "noninterleaved-sapp",        .hasShader=true },
-		// { .name = "nuklear-images-sapp",        .hasShader=false }, //TODO: Depends on libs/nuklear
-		// { .name = "nuklear-sapp",               .hasShader=false }, //TODO: Depends on libs/nuklear
+		// { .name = "nuklear-images-sapp",        .hasShader=false, .dependencies={ "nuklear" } }, //TODO: Finish support for nuklear
+		// { .name = "nuklear-sapp",               .hasShader=false, .dependencies={ "nuklear" } }, //TODO: Finish support for nuklear
 		{ .name = "offscreen-msaa-sapp",        .hasShader=true },
 		{ .name = "offscreen-sapp",             .hasShader=true },
-		// { .name = "ozz-anim-sapp",              .hasShader=false, .isCpp=true }, //TODO: Depends on libs/imgui
-		// { .name = "ozz-skin-sapp",              .hasShader=true, .isCpp=true }, //TODO: Depends on libs/imgui
-		// { .name = "ozz-storagebuffer-sapp",     .hasShader=true, .isCpp=true }, //TODO: Depends on libs/imgui
-		// { .name = "pixelformats-sapp",          .hasShader=true }, //TODO: Depends on libs/cimgui
-		// { .name = "plmpeg-sapp",                .hasShader=true }, //TODO: Depends on libs/utils/fileutil
+		// { .name = "ozz-anim-sapp",              .hasShader=false, .isCpp=true, .dependencies={ "imgui" } }, //TODO: Cannot open include file: 'ozz/animation/runtime/animation.h': No such file or directory
+		// { .name = "ozz-skin-sapp",              .hasShader=true, .isCpp=true, .dependencies={ "imgui" } }, //TODO: Cannot open include file: 'ozz/animation/runtime/animation.h': No such file or directory
+		// { .name = "ozz-storagebuffer-sapp",     .hasShader=true, .isCpp=true, .dependencies={ "imgui" } }, //TODO: Cannot open include file: 'ozz/animation/runtime/animation.h': No such file or directory
+		{ .name = "pixelformats-sapp",          .hasShader=true, .dependencies={ "cimgui" } },
+		{ .name = "plmpeg-sapp",                .hasShader=true, .dependencies={ "fileutil" } },
 		{ .name = "primtypes-sapp",             .hasShader=true },
 		{ .name = "quad-sapp",                  .hasShader=true },
 		// { .name = "restart-sapp",               .hasShader=true }, //TODO: Depends on modplug.h
@@ -330,7 +347,7 @@ int main(int argc, char* argv[])
 		{ .name = "shapes-sapp",                .hasShader=true },
 		{ .name = "shapes-transform-sapp",      .hasShader=true },
 		{ .name = "shared-bindings-sapp",       .hasShader=true },
-		// { .name = "shdfeatures-sapp",           .hasShader=true }, //TODO: Depends on libs/cimgui
+		// { .name = "shdfeatures-sapp",           .hasShader=true, .dependencies={ "cimgui" } }, //TODO: Need a .glsl.none.h file?
 		// { .name = "spine-contexts-sapp",        .hasShader=false }, //TODO: Depends on spine.h
 		// { .name = "spine-inspector-sapp",       .hasShader=false }, //TODO: Depends on spine.h
 		// { .name = "spine-layers-sapp",          .hasShader=false }, //TODO: Depends on spine.h
@@ -339,7 +356,7 @@ int main(int argc, char* argv[])
 		// { .name = "spine-switch-skinsets-sapp", .hasShader=false }, //TODO: Depends on spine.h
 		{ .name = "tex3d-sapp",                 .hasShader=true },
 		{ .name = "texcube-sapp",               .hasShader=true },
-		// { .name = "texview-sapp",               .hasShader=true }, //TODO: Depends on libs/cimgui
+		{ .name = "texview-sapp",               .hasShader=true, .dependencies={ "cimgui", "basisu", "fileutil" } },
 		{ .name = "triangle-bufferless-sapp",   .hasShader=true },
 		{ .name = "triangle-sapp",              .hasShader=true },
 		{ .name = "uniformtypes-sapp",          .hasShader=true },
@@ -368,14 +385,27 @@ int main(int argc, char* argv[])
 		Str shaderSrcPath = JoinStrings2(exampleName, def.isCpp ? StrLit(".glsl.cc") : StrLit(".glsl.c"));
 		
 		bool dependsOnImgui = false;
+		bool dependsOnImguiDocking = false;
 		bool dependsOnCImgui = false;
-		for (u64 dIndex = 0; dIndex < ArrayCount(def.dependency); dIndex++)
+		bool dependsOnFileUtil = false;
+		bool dependsOnQoi = false;
+		bool dependsOnIlbm = false;
+		bool dependsOnBasisu = false;
+		bool dependsOnNuklear = false;
+		for (u64 dIndex = 0; dIndex < ArrayCount(def.dependencies); dIndex++)
 		{
-			if (def.dependency[dIndex] == nullptr) { continue; }
-			if (strcmp(def.dependency[dIndex], "imgui") == 0) { dependsOnImgui = true; }
-			if (strcmp(def.dependency[dIndex], "cimgui") == 0) { dependsOnCImgui = true; }
+			if (def.dependencies[dIndex] == nullptr) { continue; }
+			if (strcmp(def.dependencies[dIndex], "imgui") == 0) { dependsOnImgui = true; }
+			if (strcmp(def.dependencies[dIndex], "imgui-docking") == 0) { dependsOnImguiDocking = true; }
+			if (strcmp(def.dependencies[dIndex], "cimgui") == 0) { dependsOnCImgui = true; }
+			if (strcmp(def.dependencies[dIndex], "fileutil") == 0) { dependsOnFileUtil = true; }
+			if (strcmp(def.dependencies[dIndex], "qoi") == 0) { dependsOnQoi = true; }
+			if (strcmp(def.dependencies[dIndex], "ilbm") == 0) { dependsOnIlbm = true; }
+			if (strcmp(def.dependencies[dIndex], "basisu") == 0) { dependsOnBasisu = true; }
+			if (strcmp(def.dependencies[dIndex], "nuklear") == 0) { dependsOnNuklear = true; }
 		}
 		Assert(!dependsOnImgui || def.isCpp);
+		Assert(!dependsOnImguiDocking || def.isCpp);
 		Assert(!dependsOnCImgui || !def.isCpp);
 		
 		// +==============================+
@@ -437,11 +467,20 @@ int main(int argc, char* argv[])
 		AddArgStr(&args, CLI_QUOTED_ARG, sokolObjFile);
 		if (def.hasShader) { AddArgStr(&args, CLI_QUOTED_ARG, shaderSrcPath); }
 		if (dependsOnImgui || dependsOnCImgui) { AddArgStr(&args, CLI_QUOTED_ARG, imguiLibPath); }
+		if (dependsOnImguiDocking) { AddArgStr(&args, CLI_QUOTED_ARG, imguiDockingLibPath); }
+		if (dependsOnFileUtil) { AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/libs/util/fileutil.c"); }
+		if (dependsOnIlbm) { AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/libs/ilbm/ilbm.c"); }
+		if (dependsOnBasisu) { AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/libs/basisu/sokol_basisu.cpp"); }
+		if (dependsOnNuklear)
+		{
+			AddTaggedArgNt(&args, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/nuklear");
+			AddTaggedArgNt(&args, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/nuklear");
+		}
+		if (dependsOnQoi) { AddTaggedArgNt(&args, T_MSVC_CL, CL_DEFINE, "QOI_IMPLEMENTATION"); }
 		AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, exampleBinName);
 		AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, exampleBinName);
 		IF_WINDOWS(AddTaggedArgStr(&args, T_MSVC_CL, CL_PDB_FILE, JoinStrings2(GetFileNamePart(exampleSrcPath, false), StrLit(".pdb"))));
 		AddArgList(&args, &commonArgs);
-		
 		
 		#if ONLY_BUILD_NON_EXISTANT_SAMPLES
 		if (!DoesFileExist(exampleBinName))
@@ -457,9 +496,9 @@ int main(int argc, char* argv[])
 				AddTag(&tags, T_MSVC_CL);
 				AddTag(&tags, T_MSVC_CL_OR_LINK);
 				AddTag(&tags, T_WINDOWS);
-				for (u64 dIndex = 0; dIndex < ArrayCount(def.dependency); dIndex++)
+				for (u64 dIndex = 0; dIndex < ArrayCount(def.dependencies); dIndex++)
 				{
-					if (def.dependency[dIndex] != nullptr) { AddStrNt(&tags, def.dependency[dIndex]); }
+					if (def.dependencies[dIndex] != nullptr) { AddStrNt(&tags, def.dependencies[dIndex]); }
 				}
 				RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_CL), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(exampleFileName), StrPrint(exampleBinName)));
 				AssertFileExist(exampleBinName, true);
@@ -529,11 +568,11 @@ void DownloadSokolIfNeeded()
 
 void DownloadDCImguiIfNeeded()
 {
-	// https://github.com/floooh/dcimgui/commit/e2f0e0d93adec02743c55940be23ffe286e857f7
-	// Commit e2f0e0d from May 12th 2026 - "updated (v1.92.8)"
-	Str dcImguiUrl = StrLit("https://github.com/floooh/dcimgui/archive/e2f0e0d93adec02743c55940be23ffe286e857f7.zip");
-	Str dcImguiZipPath = StrLit("dcimgui_v1.92.8.zip");
-	Str dcImguiZipRootFolder = StrLit("dcimgui-e2f0e0d93adec02743c55940be23ffe286e857f7");
+	// https://github.com/floooh/dcimgui/commit/f276b9ce0d03004916441daa28504c686cd37ecc
+	// Commit f276b9c from April 15th 2026 - "build.zig: remove zig 0.15 support"
+	Str dcImguiUrl = StrLit("https://github.com/floooh/dcimgui/archive/f276b9ce0d03004916441daa28504c686cd37ecc.zip");
+	Str dcImguiZipPath = StrLit("dcimgui_v1.92.7.zip");
+	Str dcImguiZipRootFolder = StrLit("dcimgui-f276b9ce0d03004916441daa28504c686cd37ecc");
 	Str dcImguiFolderPath = StrLit("../dcimgui");
 	if (!DoesFileExist(dcImguiZipPath) || !DoesFolderExist(dcImguiFolderPath))
 	{
@@ -542,9 +581,31 @@ void DownloadDCImguiIfNeeded()
 		DownloadAndExtractArchive(
 			dcImguiUrl,
 			dcImguiZipPath,
-			2451561, 0xB32DDA9BCE94A82E,
+			2434694, 0xCB162595C1A06724,
 			dcImguiFolderPath,
 			dcImguiZipRootFolder
+		);
+	}
+}
+
+void DownloadNuklearIfNeeded()
+{
+	// https://github.com/Immediate-Mode-UI/Nuklear
+	// v4.13.3 from May 4th 2026 - https://github.com/Immediate-Mode-UI/Nuklear/releases/tag/v4.13.3
+	Str nuklearUrl = StrLit("https://github.com/Immediate-Mode-UI/Nuklear/archive/refs/tags/v4.13.3.zip");
+	Str nuklearZipPath = StrLit("nuklear_v4.13.3.zip");
+	Str nuklearZipRootFolder = StrLit("Nuklear-4.13.3");
+	Str nuklearFolderPath = StrLit("../nuklear");
+	if (!DoesFileExist(nuklearZipPath) || !DoesFolderExist(nuklearFolderPath))
+	{
+		PrintLine("Downloading nuklear from \"%.*s\"", StrPrint(nuklearUrl));
+		// if (DoesFolderExist(nuklearFolderPath)) { MyRemoveDirectory(nuklearFolderPath, true); } //TODO: Enable me once MyRemoveDirectory is implemented for OSX/Linux!
+		DownloadAndExtractArchive(
+			nuklearUrl,
+			nuklearZipPath,
+			2452230, 0x43B1710B6B246AF2,
+			nuklearFolderPath,
+			nuklearZipRootFolder
 		);
 	}
 }
