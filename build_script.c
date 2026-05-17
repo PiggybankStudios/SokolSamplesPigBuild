@@ -163,6 +163,33 @@ int main(int argc, char* argv[])
 		#error The current platform is not supported yet!
 		#endif
 	}
+	Str sokolDllFile = BUILDING_ON_WINDOWS ? StrLit("sokol.dll") : (BUILDING_ON_OSX ? StrLit("sokol.dylib") : StrLit("sokol.so"));
+	Str sokolLibFile = BUILDING_ON_WINDOWS ? StrLit("sokol.lib") : (BUILDING_ON_OSX ? StrLit("sokol.dylib") : StrLit("sokol.so"));
+	if (!DoesFileExist(sokolDllFile))
+	{
+		CliArgs args = EMPTY;
+		AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/libs/sokol/sokol-dll.c");
+		AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, sokolDllFile);
+		AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, sokolDllFile);
+		AddTaggedArgNt(&args, T_MSVC_CL, CL_PDB_FILE, "sokol_dll.pdb");
+		AddArgList(&args, &commonArgs);
+		AddTaggedArg(&args, T_MSVC_CL, LINK_BUILD_DLL);
+		
+		#if BUILDING_ON_WINDOWS
+		{
+			PrintLine("[Building %.*s for WINDOWS...]", StrPrint(sokolDllFile));
+			InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
+			RunCliProgramAndExitOnFailure(StrLit(EXE_MSVC_CL), T_MSVC_CL T_WINDOWS T_LANG_C T_LIBRARY, &args, FormatStr("Failed to compile sokol-dll.c into %.*s", StrPrint(sokolDllFile)));
+			AssertFileExist(sokolDllFile, true);
+			PrintLine("[Successfully built %.*s for WINDOWS!]", StrPrint(sokolDllFile));
+		}
+		#else
+		#error The current platform is not supported yet!
+		#endif
+	}
+	#if COPY_TO_BIN
+	CopyFileToFolder(sokolDllFile, StrLit("../bin"), true);
+	#endif
 	
 	// +--------------------------------------------------------------+
 	// |                        Compile Imgui                         |
@@ -318,7 +345,7 @@ int main(int argc, char* argv[])
 		// { .name = "modplay-sapp",               .hasShader=false }, //TODO: Depends on modplug.h
 		{ .name = "mrt-pixelformats-sapp",      .hasShader=true },
 		{ .name = "mrt-sapp",                   .hasShader=true },
-		// { .name = "noentry-dll-sapp",           .hasShader=true }, //TODO: Depends on sokol.dll
+		{ .name = "noentry-dll-sapp",           .hasShader=true, .dependencies={ "sokol_dll" } },
 		// { .name = "noentry-sapp",               .hasShader=true }, //TODO: Depends on noentry version of sokol_app.h
 		{ .name = "noninterleaved-sapp",        .hasShader=true },
 		// { .name = "nuklear-images-sapp",        .hasShader=false, .dependencies={ "nuklear" } }, //TODO: Finish support for nuklear
@@ -384,6 +411,7 @@ int main(int argc, char* argv[])
 		Str shaderHeaderPath = JoinStrings2(exampleName, StrLit(".glsl.h"));
 		Str shaderSrcPath = JoinStrings2(exampleName, def.isCpp ? StrLit(".glsl.cc") : StrLit(".glsl.c"));
 		
+		bool dependsOnSokolDll = false;
 		bool dependsOnImgui = false;
 		bool dependsOnImguiDocking = false;
 		bool dependsOnCImgui = false;
@@ -395,6 +423,7 @@ int main(int argc, char* argv[])
 		for (u64 dIndex = 0; dIndex < ArrayCount(def.dependencies); dIndex++)
 		{
 			if (def.dependencies[dIndex] == nullptr) { continue; }
+			if (strcmp(def.dependencies[dIndex], "sokol_dll") == 0) { dependsOnSokolDll = true; }
 			if (strcmp(def.dependencies[dIndex], "imgui") == 0) { dependsOnImgui = true; }
 			if (strcmp(def.dependencies[dIndex], "imgui-docking") == 0) { dependsOnImguiDocking = true; }
 			if (strcmp(def.dependencies[dIndex], "cimgui") == 0) { dependsOnCImgui = true; }
@@ -464,7 +493,8 @@ int main(int argc, char* argv[])
 		// +==============================+
 		CliArgs args = EMPTY;
 		AddArgStr(&args, CLI_QUOTED_ARG, exampleSrcPath);
-		AddArgStr(&args, CLI_QUOTED_ARG, sokolObjFile);
+		if (dependsOnSokolDll) { AddArgStr(&args, CLI_QUOTED_ARG, sokolLibFile); }
+		else { AddArgStr(&args, CLI_QUOTED_ARG, sokolObjFile); }
 		if (def.hasShader) { AddArgStr(&args, CLI_QUOTED_ARG, shaderSrcPath); }
 		if (dependsOnImgui || dependsOnCImgui) { AddArgStr(&args, CLI_QUOTED_ARG, imguiLibPath); }
 		if (dependsOnImguiDocking) { AddArgStr(&args, CLI_QUOTED_ARG, imguiDockingLibPath); }
