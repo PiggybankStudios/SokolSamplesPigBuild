@@ -159,6 +159,13 @@ int main(int argc, char* argv[])
 			AssertFileExist(sokolObjFile, true);
 			PrintLine("[Successfully built %.*s for WINDOWS!]", StrPrint(sokolObjFile));
 		}
+		#elif BUILDING_ON_OSX
+		{
+			PrintLine("[Building %.*s for OSX...]", StrPrint(sokolObjFile));
+			RunCliProgramAndExitOnFailure(StrLit(EXE_CLANG), T_CLANG T_OSX T_LANG_C, &args, FormatStr("Failed to compile sokol.c into %.*s", StrPrint(sokolObjFile)));
+			AssertFileExist(sokolObjFile, true);
+			PrintLine("[Successfully built %.*s for OSX!]", StrPrint(sokolObjFile));
+		}
 		#else
 		#error The current platform is not supported yet!
 		#endif
@@ -182,6 +189,13 @@ int main(int argc, char* argv[])
 			RunCliProgramAndExitOnFailure(StrLit(EXE_MSVC_CL), T_MSVC_CL T_WINDOWS T_LANG_C T_LIBRARY, &args, FormatStr("Failed to compile sokol-dll.c into %.*s", StrPrint(sokolDllFile)));
 			AssertFileExist(sokolDllFile, true);
 			PrintLine("[Successfully built %.*s for WINDOWS!]", StrPrint(sokolDllFile));
+		}
+		#elif BUILDING_ON_OSX
+		{
+			PrintLine("[Building %.*s for OSX...]", StrPrint(sokolDllFile));
+			RunCliProgramAndExitOnFailure(StrLit(EXE_CLANG), T_CLANG T_OSX T_LANG_C T_LIBRARY, &args, FormatStr("Failed to compile sokol-dll.c into %.*s", StrPrint(sokolDllFile)));
+			AssertFileExist(sokolDllFile, true);
+			PrintLine("[Successfully built %.*s for OSX!]", StrPrint(sokolDllFile));
 		}
 		#else
 		#error The current platform is not supported yet!
@@ -241,12 +255,21 @@ int main(int argc, char* argv[])
 				if (StrAnyCaseEquals(GetFileExtPart(sourcePath, false), StrLit(".cc"))) { AddTag(&tags, T_LANG_CPP); }
 				
 				#if BUILDING_ON_WINDOWS
-				AddTag(&tags, T_MSVC_CL);
-				AddTag(&tags, T_MSVC_CL_OR_LINK);
-				AddTag(&tags, T_WINDOWS);
-				InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
-				RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_CL), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(sourcePath), StrPrint(objPath)));
-				AssertFileExist(objPath, true);
+				{
+					AddTag(&tags, T_MSVC_CL);
+					AddTag(&tags, T_MSVC_CL_OR_LINK);
+					AddTag(&tags, T_WINDOWS);
+					InitializeMsvcIf(pigBuildFolder, &isMsvcInitialized);
+					RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_CL), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(sourcePath), StrPrint(objPath)));
+					AssertFileExist(objPath, true);
+				}
+				#elif BUILDING_ON_OSX
+				{
+					AddTag(&tags, T_CLANG);
+					AddTag(&tags, T_OSX);
+					RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_CLANG), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(sourcePath), StrPrint(objPath)));
+					AssertFileExist(objPath, true);
+				}
 				#else
 				#error The current platform is not supported yet!
 				#endif
@@ -264,8 +287,8 @@ int main(int argc, char* argv[])
 				{
 					AddArgStr(&args, CLI_QUOTED_ARG, objFiles.strings[oIndex]);
 				}
-				AddArgStr(&args, LINK_OUTPUT_FILE, dllPath);
-				AddArgStr(&args, LINK_IMPORT_LIBRARY_FILE, libPath);
+				AddTaggedArgStr(&args, T_MSVC_LINK, LINK_OUTPUT_FILE, dllPath);
+				AddTaggedArgStr(&args, T_MSVC_LINK, LINK_IMPORT_LIBRARY_FILE, libPath);
 				AddArgList(&args, &commonArgs);
 				
 				StrArray tags = EMPTY;
@@ -273,12 +296,22 @@ int main(int argc, char* argv[])
 				AddTag(&tags, "|imgui_lib");
 				
 				#if BUILDING_ON_WINDOWS
-				AddTag(&tags, T_MSVC_LINK);
-				AddTag(&tags, T_MSVC_CL_OR_LINK);
-				AddTag(&tags, T_WINDOWS);
-				RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_LINK), &tags, &args, FormatStr("Failed to link %.*s", StrPrint(dllPath)));
-				AssertFileExist(dllPath, true);
-				AssertFileExist(libPath, true);
+				{
+					AddTag(&tags, T_MSVC_LINK);
+					AddTag(&tags, T_MSVC_CL_OR_LINK);
+					AddTag(&tags, T_WINDOWS);
+					RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_MSVC_LINK), &tags, &args, FormatStr("Failed to link %.*s", StrPrint(dllPath)));
+					AssertFileExist(dllPath, true);
+					AssertFileExist(libPath, true);
+				}
+				#elif BUILDING_ON_OSX
+				{
+					AddTag(&tags, T_CLANG);
+					AddTag(&tags, T_OSX);
+					RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_CLANG), &tags, &args, FormatStr("Failed to link %.*s", StrPrint(dllPath)));
+					AssertFileExist(dllPath, true);
+					AssertFileExist(libPath, true);
+				}
 				#else
 				#error The current platform is not supported yet!
 				#endif
@@ -536,6 +569,22 @@ int main(int argc, char* argv[])
 				CopyFileToFolder(exampleBinName, StrLit("../bin"), true);
 				#endif
 				PrintLine("[Successfully built %.*s for WINDOWS!]", StrPrint(exampleBinName));
+			}
+			#elif BUILDING_ON_OSX
+			{
+				PrintLine("[Building %.*s for OSX...]", StrPrint(exampleBinName));
+				AddTag(&tags, T_CLANG);
+				AddTag(&tags, T_OSX);
+				for (u64 dIndex = 0; dIndex < ArrayCount(def.dependencies); dIndex++)
+				{
+					if (def.dependencies[dIndex] != nullptr) { AddStrNt(&tags, def.dependencies[dIndex]); }
+				}
+				RunCliProgramTagArrayAndExitOnFailure(StrLit(EXE_CLANG), &tags, &args, FormatStr("Failed to compile %.*s into %.*s", StrPrint(exampleFileName), StrPrint(exampleBinName)));
+				AssertFileExist(exampleBinName, true);
+				#if COPY_TO_BIN
+				CopyFileToFolder(exampleBinName, StrLit("../bin"), true);
+				#endif
+				PrintLine("[Successfully built %.*s for OSX!]", StrPrint(exampleBinName));
 			}
 			#else
 			#error The current platform is not supported yet!
