@@ -95,16 +95,14 @@ int main(int argc, char* argv[])
 	AddTaggedArgNt(&commonArgs, T_CLANG T_LANG_CPP, CLANG_LANG_VERSION, "c++20");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, ".");
 	// AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]");
-	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/../sokol");
-	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/../sokol/util");
+	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/sokol");
+	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/sokol/util");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/sapp");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/libs");
 	AddTaggedArgNt(&commonArgs, T_CLANG "|imgui", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src");
 	AddTaggedArgNt(&commonArgs, T_CLANG "|imgui-docking", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src-docking");
 	AddTaggedArgNt(&commonArgs, T_CLANG "|cimgui", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_OUTPUT_FILE, "sokol_triangle");
-	AddTaggedArgNt(&commonArgs, T_CLANG T_OSX "==false", CLI_QUOTED_ARG, "[ROOT]/main.c");
-	AddTaggedArgNt(&commonArgs, T_CLANG T_OSX "==true", CLI_QUOTED_ARG, "main.m");
 	
 	// +==============================+
 	// |     Linux Compiler Flags     |
@@ -143,6 +141,7 @@ int main(int argc, char* argv[])
 	if (!DoesFileExist(sokolObjFile))
 	{
 		CliArgs args = EMPTY;
+		AddTaggedArgNt(&commonArgs, T_CLANG T_OSX, "-x [VAL]", "objective-c");
 		AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/libs/sokol/sokol.c");
 		AddTaggedArg(&args, T_MSVC_CL, CL_COMPILE);
 		AddTaggedArg(&args, T_CLANG, CLANG_COMPILE);
@@ -175,6 +174,7 @@ int main(int argc, char* argv[])
 	if (!DoesFileExist(sokolDllFile))
 	{
 		CliArgs args = EMPTY;
+		AddTaggedArgNt(&commonArgs, T_CLANG T_OSX, "-x [VAL]", "objective-c");
 		AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/libs/sokol/sokol-dll.c");
 		AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, sokolDllFile);
 		AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, sokolDllFile);
