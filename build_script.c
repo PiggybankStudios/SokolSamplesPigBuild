@@ -11,7 +11,7 @@ Description:
 
 #define DEBUG_BUILD 1
 #define COPY_TO_BIN 1
-#define ONLY_BUILD_NON_EXISTANT_SAMPLES 1
+#define ONLY_BUILD_NON_EXISTANT_SAMPLES 0
 
 #if DEBUG_BUILD
 #define IF_DEBUG(...)    __VA_ARGS__
@@ -22,13 +22,13 @@ Description:
 #endif
 
 #if BUILDING_ON_WINDOWS
-#define SHDC_BIN_PATH "..\\sokol_tools\\bin\\win32\\sokol-shdc.exe"
+#define SHDC_BIN_PATH "..\\downloaded\\sokol_tools\\bin\\win32\\sokol-shdc.exe"
 #elif BUILDING_ON_LINUX
-#define SHDC_BIN_PATH "../sokol_tools/bin/linux/sokol-shdc"
+#define SHDC_BIN_PATH "../downloaded/sokol_tools/bin/linux/sokol-shdc"
 #elif BUILDING_ON_OSX_ARM
-#define SHDC_BIN_PATH  "../sokol_tools/bin/osx_arm64/sokol-shdc"
+#define SHDC_BIN_PATH  "../downloaded/sokol_tools/bin/osx_arm64/sokol-shdc"
 #elif BUILDING_ON_OSX_INTEL
-#define SHDC_BIN_PATH  "../sokol_tools/bin/osx/sokol-shdc"
+#define SHDC_BIN_PATH  "../downloaded/sokol_tools/bin/osx/sokol-shdc"
 #else
 #error build_script.c SHDC_BIN_PATH needs to be updated to support the current platform!
 #endif
@@ -41,11 +41,14 @@ struct SappExample
 	bool isCpp;
 	bool hasShader;
 	bool isComputeShader;
+	bool useSokolDll;
 	const char* dependencies[MAX_DEPENDENCIES];
 };
 
 void DownloadSokolIfNeeded();
 void DownloadDCImguiIfNeeded();
+void DownloadMicroUiIfNeeded();
+void DownloadStbIfNeeded();
 void DownloadNuklearIfNeeded();
 
 int main(int argc, char* argv[])
@@ -54,9 +57,17 @@ int main(int argc, char* argv[])
 	Str pigBuildFolder = StrLit(PIG_BUILD_ROOT);
 	IF_WINDOWS(bool isMsvcInitialized = WasMsvcDevBatchRun());
 	
+	Str imguiLibPath = StrLit("imgui.lib");
+	Str imguiDllPath = StrLit("imgui.dll");
+	Str imguiDockingLibPath = StrLit("imgui_docking.lib");
+	Str imguiDockingDllPath = StrLit("imgui_docking.dll");
+	
+	if (!DoesFolderExist(StrLit("../downloaded"))) { mkdir("../downloaded", FOLDER_PERMISSIONS); }
 	DownloadSokolIfNeeded();
 	DownloadDCImguiIfNeeded();
-	// DownloadNuklearIfNeeded(); //TODO: Re-enable me once we have nuklear fully compiling/linking
+	DownloadStbIfNeeded();
+	DownloadMicroUiIfNeeded();
+	DownloadNuklearIfNeeded();
 	
 	#if COPY_TO_BIN
 	if (!DoesFolderExist(StrLit("../bin"))) { mkdir("../bin", FOLDER_PERMISSIONS); }
@@ -74,13 +85,17 @@ int main(int argc, char* argv[])
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL T_LANG_CPP, CL_LANG_VERSION, "c++20");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, ".");
 	// AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]");
-	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/../sokol");
-	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/../sokol/util");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/sapp");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/libs");
-	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|imgui", CL_INCLUDE_DIR, "[ROOT]/dcimgui/src");
-	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|imgui-docking", CL_INCLUDE_DIR, "[ROOT]/dcimgui/src-docking");
-	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|cimgui", CL_INCLUDE_DIR, "[ROOT]/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/downloaded/sokol");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/downloaded/sokol/util");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|stb", CL_INCLUDE_DIR, "[ROOT]/downloaded/stb");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|imgui", CL_INCLUDE_DIR, "[ROOT]/downloaded/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|imgui-docking", CL_INCLUDE_DIR, "[ROOT]/downloaded/dcimgui/src-docking");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|cimgui", CL_INCLUDE_DIR, "[ROOT]/downloaded/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|microui", CL_INCLUDE_DIR, "[ROOT]/downloaded/microui/src");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|microui", CL_INCLUDE_DIR, "[ROOT]/downloaded/microui/demo");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|nuklear", CL_INCLUDE_DIR, "[ROOT]/downloaded/nuklear");
 	IF_DEBUG(AddTaggedArg(&commonArgs, T_MSVC_CL, CL_DEBUG_INFO));
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL, CL_OPTIMIZATION_LEVEL, DEBUG_BUILD ? "d" : "2");
 	
@@ -95,14 +110,34 @@ int main(int argc, char* argv[])
 	AddTaggedArgNt(&commonArgs, T_CLANG T_LANG_CPP, CLANG_LANG_VERSION, "c++20");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, ".");
 	// AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]");
-	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/sokol");
-	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/sokol/util");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/sapp");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/libs");
-	AddTaggedArgNt(&commonArgs, T_CLANG "|imgui", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src");
-	AddTaggedArgNt(&commonArgs, T_CLANG "|imgui-docking", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src-docking");
-	AddTaggedArgNt(&commonArgs, T_CLANG "|cimgui", CLANG_INCLUDE_DIR, "[ROOT]/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/downloaded/sokol");
+	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/downloaded/sokol/util");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|stb", CLANG_INCLUDE_DIR, "[ROOT]/downloaded/stb");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|imgui", CLANG_INCLUDE_DIR, "[ROOT]/downloaded/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|imgui-docking", CLANG_INCLUDE_DIR, "[ROOT]/downloaded/dcimgui/src-docking");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|cimgui", CLANG_INCLUDE_DIR, "[ROOT]/downloaded/dcimgui/src");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|microui", CLANG_INCLUDE_DIR, "[ROOT]/downloaded/microui/src");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|microui", CLANG_INCLUDE_DIR, "[ROOT]/downloaded/microui/demo");
+	AddTaggedArgNt(&commonArgs, T_CLANG "|nuklear", CLANG_INCLUDE_DIR, "[ROOT]/downloaded/nuklear");
 	AddTaggedArgNt(&commonArgs, T_CLANG, CLANG_OUTPUT_FILE, "sokol_triangle");
+	
+	// +==============================+
+	// |  Dependency Specific Flags   |
+	// +==============================+
+	AddTaggedArgStr(&commonArgs,          "imgui",         CLI_QUOTED_ARG, imguiLibPath);
+	AddTaggedArgStr(&commonArgs,          "cimgui",        CLI_QUOTED_ARG, imguiLibPath);
+	AddTaggedArgStr(&commonArgs,          "imgui-docking", CLI_QUOTED_ARG, imguiDockingLibPath);
+	AddTaggedArgNt(&commonArgs,           "fileutil",      CLI_QUOTED_ARG, "[ROOT]/libs/util/fileutil.c");
+	AddTaggedArgNt(&commonArgs,           "ilbm",          CLI_QUOTED_ARG, "[ROOT]/libs/ilbm/ilbm.c");
+	AddTaggedArgNt(&commonArgs,           "basisu",        CLI_QUOTED_ARG, "[ROOT]/libs/basisu/sokol_basisu.cpp");
+	AddTaggedArgNt(&commonArgs,           "microui",       CLI_QUOTED_ARG, "[ROOT]/downloaded/microui/src/microui.c");
+	AddTaggedArgNt(&commonArgs,           "nuklear",       CLI_QUOTED_ARG, "[ROOT]/libs/nuklear/nuklear.c");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|qoi",          CL_DEFINE, "QOI_IMPLEMENTATION");
+	AddTaggedArgNt(&commonArgs, T_CLANG   "|nuklear",      CLANG_INCLUDE_DIR, "[ROOT]/downloaded/nuklear");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|nuklear",      CL_INCLUDE_DIR, "[ROOT]/downloaded/nuklear");
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|nuklear",      CL_DISABLE_WARNING, "5287"); //operands are different enum types 'nk_edit_types' and 'nk_edit_flags'; use an explicit cast to silence this warning
 	
 	// +==============================+
 	// |     Linux Compiler Flags     |
@@ -208,10 +243,6 @@ int main(int argc, char* argv[])
 	// +--------------------------------------------------------------+
 	// |                        Compile Imgui                         |
 	// +--------------------------------------------------------------+
-	Str imguiLibPath = StrLit("imgui.lib");
-	Str imguiDllPath = StrLit("imgui.dll");
-	Str imguiDockingLibPath = StrLit("imgui_docking.lib");
-	Str imguiDockingDllPath = StrLit("imgui_docking.dll");
 	for (u64 dockingEnabled = 0; dockingEnabled < 2; dockingEnabled++)
 	{
 		Str libPath = (dockingEnabled ? imguiDockingLibPath : imguiLibPath);
@@ -220,13 +251,13 @@ int main(int argc, char* argv[])
 		{
 			PrintLine("[Building %.*s...]", StrPrint(dllPath));
 			StrArray sourceFiles = EMPTY;
-			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/cimgui.cpp"          : "[ROOT]/dcimgui/src/cimgui.cpp");
-			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/cimgui_internal.cpp" : "[ROOT]/dcimgui/src/cimgui_internal.cpp");
-			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui_demo.cpp"      : "[ROOT]/dcimgui/src/imgui_demo.cpp");
-			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui_draw.cpp"      : "[ROOT]/dcimgui/src/imgui_draw.cpp");
-			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui_tables.cpp"    : "[ROOT]/dcimgui/src/imgui_tables.cpp");
-			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui_widgets.cpp"   : "[ROOT]/dcimgui/src/imgui_widgets.cpp");
-			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/dcimgui/src-docking/imgui.cpp"           : "[ROOT]/dcimgui/src/imgui.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/downloaded/dcimgui/src-docking/cimgui.cpp"          : "[ROOT]/downloaded/dcimgui/src/cimgui.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/downloaded/dcimgui/src-docking/cimgui_internal.cpp" : "[ROOT]/downloaded/dcimgui/src/cimgui_internal.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/downloaded/dcimgui/src-docking/imgui_demo.cpp"      : "[ROOT]/downloaded/dcimgui/src/imgui_demo.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/downloaded/dcimgui/src-docking/imgui_draw.cpp"      : "[ROOT]/downloaded/dcimgui/src/imgui_draw.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/downloaded/dcimgui/src-docking/imgui_tables.cpp"    : "[ROOT]/downloaded/dcimgui/src/imgui_tables.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/downloaded/dcimgui/src-docking/imgui_widgets.cpp"   : "[ROOT]/downloaded/dcimgui/src/imgui_widgets.cpp");
+			AddStrNt(&sourceFiles, dockingEnabled ? "[ROOT]/downloaded/dcimgui/src-docking/imgui.cpp"           : "[ROOT]/downloaded/dcimgui/src/imgui.cpp");
 			
 			// +==============================+
 			// |   Build Imgui Source Files   |
@@ -340,7 +371,7 @@ int main(int argc, char* argv[])
 		{ .name = "clear-sapp",                 .hasShader=false },
 		{ .name = "computeboids-sapp",          .hasShader=true, .isComputeShader=true, .dependencies={ "cimgui" } },
 		{ .name = "cube-sapp",                  .hasShader=true },
-		// { .name = "cubemap-jpeg-sapp",          .hasShader=true }, //TODO: Depends on stb_image.h?
+		{ .name = "cubemap-jpeg-sapp",          .hasShader=true, .dependencies={ "stb", "fileutil" } },
 		{ .name = "cubemaprt-sapp",             .hasShader=true },
 		{ .name = "cursor-sapp",                .hasShader=false, .isCpp=true, .dependencies={ "imgui" } },
 		{ .name = "customresolve-sapp",         .hasShader=true, .dependencies={ "cimgui" } },
@@ -360,7 +391,7 @@ int main(int argc, char* argv[])
 		{ .name = "framebuffer-sapp",           .hasShader=false },
 		{ .name = "icon-sapp",                  .hasShader=false },
 		{ .name = "ilbm-sapp",                  .hasShader=false, .dependencies={ "cimgui", "ilbm", "fileutil" } },
-		// { .name = "imageblur-sapp",             .hasShader=true, .isComputeShader=true, .dependencies={ "cimgui" } }, //TODO: Depends on stb_image.h?
+		{ .name = "imageblur-sapp",             .hasShader=true, .isComputeShader=true, .dependencies={ "cimgui", "stb", "fileutil" } },
 		{ .name = "imgui-dock-sapp",            .hasShader=false, .isCpp=true, .dependencies={ "imgui-docking" } },
 		{ .name = "imgui-highdpi-sapp",         .hasShader=false, .isCpp=true, .dependencies={ "imgui" } },
 		{ .name = "imgui-images-sapp",          .hasShader=false, .dependencies={ "cimgui" } },
@@ -372,17 +403,17 @@ int main(int argc, char* argv[])
 		{ .name = "instancing-sapp",            .hasShader=true },
 		{ .name = "layerrender-sapp",           .hasShader=true },
 		{ .name = "letterbox-sapp",             .hasShader=false, .dependencies={ "cimgui" } },
-		// { .name = "loadpng-sapp",               .hasShader=true }, //TODO: Depends on stb_image.h?
+		{ .name = "loadpng-sapp",               .hasShader=true, .dependencies={ "stb", "fileutil" } },
 		{ .name = "mipmap-sapp",                .hasShader=true },
 		{ .name = "miprender-sapp",             .hasShader=true },
-		// { .name = "modplay-sapp",               .hasShader=false }, //TODO: Depends on modplug.h
+		// { .name = "modplay-sapp",               .hasShader=false }, //TODO: Depends on https://github.com/Konstanty/libmodplug (see https://github.com/floooh/fibs-libs/blob/main/libmodplug.ts)
 		{ .name = "mrt-pixelformats-sapp",      .hasShader=true },
 		{ .name = "mrt-sapp",                   .hasShader=true },
-		{ .name = "noentry-dll-sapp",           .hasShader=true, .dependencies={ "sokol_dll" } },
+		{ .name = "noentry-dll-sapp",           .hasShader=true, .useSokolDll=true },
 		// { .name = "noentry-sapp",               .hasShader=true }, //TODO: Depends on noentry version of sokol_app.h
 		{ .name = "noninterleaved-sapp",        .hasShader=true },
-		// { .name = "nuklear-images-sapp",        .hasShader=false, .dependencies={ "nuklear" } }, //TODO: Finish support for nuklear
-		// { .name = "nuklear-sapp",               .hasShader=false, .dependencies={ "nuklear" } }, //TODO: Finish support for nuklear
+		{ .name = "nuklear-images-sapp",        .hasShader=false, .dependencies={ "nuklear" } },
+		{ .name = "nuklear-sapp",               .hasShader=false, .dependencies={ "nuklear" } },
 		{ .name = "offscreen-msaa-sapp",        .hasShader=true },
 		{ .name = "offscreen-sapp",             .hasShader=true },
 		// { .name = "ozz-anim-sapp",              .hasShader=false, .isCpp=true, .dependencies={ "imgui" } }, //TODO: Cannot open include file: 'ozz/animation/runtime/animation.h': No such file or directory
@@ -399,7 +430,7 @@ int main(int argc, char* argv[])
 		{ .name = "sdf-sapp",                   .hasShader=true },
 		{ .name = "sgl-context-sapp",           .hasShader=false },
 		{ .name = "sgl-lines-sapp",             .hasShader=false },
-		// { .name = "sgl-microui-sapp",           .hasShader=false }, //TODO: Depends on microui.h
+		{ .name = "sgl-microui-sapp",           .hasShader=false, .dependencies={ "microui" } },
 		{ .name = "sgl-points-sapp",            .hasShader=false },
 		{ .name = "sgl-sapp",                   .hasShader=false },
 		{ .name = "shadows-depthtex-sapp",      .hasShader=true },
@@ -444,32 +475,6 @@ int main(int argc, char* argv[])
 		Str shaderHeaderPath = JoinStrings2(exampleName, StrLit(".glsl.h"));
 		Str shaderSrcPath = JoinStrings2(exampleName, def.isCpp ? StrLit(".glsl.cc") : StrLit(".glsl.c"));
 		
-		bool dependsOnSokolDll = false;
-		bool dependsOnImgui = false;
-		bool dependsOnImguiDocking = false;
-		bool dependsOnCImgui = false;
-		bool dependsOnFileUtil = false;
-		bool dependsOnQoi = false;
-		bool dependsOnIlbm = false;
-		bool dependsOnBasisu = false;
-		bool dependsOnNuklear = false;
-		for (u64 dIndex = 0; dIndex < ArrayCount(def.dependencies); dIndex++)
-		{
-			if (def.dependencies[dIndex] == nullptr) { continue; }
-			if (strcmp(def.dependencies[dIndex], "sokol_dll") == 0) { dependsOnSokolDll = true; }
-			if (strcmp(def.dependencies[dIndex], "imgui") == 0) { dependsOnImgui = true; }
-			if (strcmp(def.dependencies[dIndex], "imgui-docking") == 0) { dependsOnImguiDocking = true; }
-			if (strcmp(def.dependencies[dIndex], "cimgui") == 0) { dependsOnCImgui = true; }
-			if (strcmp(def.dependencies[dIndex], "fileutil") == 0) { dependsOnFileUtil = true; }
-			if (strcmp(def.dependencies[dIndex], "qoi") == 0) { dependsOnQoi = true; }
-			if (strcmp(def.dependencies[dIndex], "ilbm") == 0) { dependsOnIlbm = true; }
-			if (strcmp(def.dependencies[dIndex], "basisu") == 0) { dependsOnBasisu = true; }
-			if (strcmp(def.dependencies[dIndex], "nuklear") == 0) { dependsOnNuklear = true; }
-		}
-		Assert(!dependsOnImgui || def.isCpp);
-		Assert(!dependsOnImguiDocking || def.isCpp);
-		Assert(!dependsOnCImgui || !def.isCpp);
-		
 		// +==============================+
 		// |     Cross-Compile Shader     |
 		// +==============================+
@@ -484,14 +489,7 @@ int main(int argc, char* argv[])
 				AddArgNt(&shdcArgs, SHDC_FORMAT, "sokol_impl");
 				AddArgNt(&shdcArgs, SHDC_ERROR_FORMAT, "msvc");
 				// AddArg(&shdcArgs, SHDC_REFLECTION);
-				if (def.isComputeShader)
-				{
-					AddArgNt(&shdcArgs, SHDC_SHADER_LANGUAGES, "hlsl5:glsl430:metal_macos");
-				}
-				else
-				{
-					AddArgNt(&shdcArgs, SHDC_SHADER_LANGUAGES, "hlsl5:glsl430:glsl300es:metal_macos");
-				}
+				AddArgNt(&shdcArgs, SHDC_SHADER_LANGUAGES, def.isComputeShader ? "hlsl5:glsl430:metal_macos" : "hlsl5:glsl430:glsl300es:metal_macos");
 				AddArgStr(&shdcArgs, SHDC_INPUT, shaderFilePath);
 				AddArgStr(&shdcArgs, SHDC_OUTPUT, shaderHeaderPath);
 				
@@ -526,20 +524,9 @@ int main(int argc, char* argv[])
 		// +==============================+
 		CliArgs args = EMPTY;
 		AddArgStr(&args, CLI_QUOTED_ARG, exampleSrcPath);
-		if (dependsOnSokolDll) { AddArgStr(&args, CLI_QUOTED_ARG, sokolLibFile); }
+		if (def.useSokolDll) { AddArgStr(&args, CLI_QUOTED_ARG, sokolLibFile); }
 		else { AddArgStr(&args, CLI_QUOTED_ARG, sokolObjFile); }
 		if (def.hasShader) { AddArgStr(&args, CLI_QUOTED_ARG, shaderSrcPath); }
-		if (dependsOnImgui || dependsOnCImgui) { AddArgStr(&args, CLI_QUOTED_ARG, imguiLibPath); }
-		if (dependsOnImguiDocking) { AddArgStr(&args, CLI_QUOTED_ARG, imguiDockingLibPath); }
-		if (dependsOnFileUtil) { AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/libs/util/fileutil.c"); }
-		if (dependsOnIlbm) { AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/libs/ilbm/ilbm.c"); }
-		if (dependsOnBasisu) { AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/libs/basisu/sokol_basisu.cpp"); }
-		if (dependsOnNuklear)
-		{
-			AddTaggedArgNt(&args, T_MSVC_CL, CL_INCLUDE_DIR, "[ROOT]/nuklear");
-			AddTaggedArgNt(&args, T_CLANG, CLANG_INCLUDE_DIR, "[ROOT]/nuklear");
-		}
-		if (dependsOnQoi) { AddTaggedArgNt(&args, T_MSVC_CL, CL_DEFINE, "QOI_IMPLEMENTATION"); }
 		AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, exampleBinName);
 		AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, exampleBinName);
 		IF_WINDOWS(AddTaggedArgStr(&args, T_MSVC_CL, CL_PDB_FILE, JoinStrings2(GetFileNamePart(exampleSrcPath, false), StrLit(".pdb"))));
@@ -603,7 +590,7 @@ void DownloadSokolIfNeeded()
 	Str sokolUrl = StrLit("https://github.com/floooh/sokol/archive/453c71214fbb55d782683d20ea7e6c07314e3e9b.zip");
 	Str sokolZipPath = StrLit("sokol_453c712.zip");
 	Str sokolZipRootFolder = StrLit("sokol-453c71214fbb55d782683d20ea7e6c07314e3e9b");
-	Str sokolFolderPath = StrLit("../sokol");
+	Str sokolFolderPath = StrLit("../downloaded/sokol");
 	if (!DoesFileExist(sokolZipPath) || !DoesFolderExist(sokolFolderPath))
 	{
 		PrintLine("Downloading Sokol from \"%.*s\"", StrPrint(sokolUrl));
@@ -622,7 +609,7 @@ void DownloadSokolIfNeeded()
 	Str sokolToolsUrl = StrLit("https://github.com/floooh/sokol-tools-bin/archive/1a9a4e54090fec42c5d13169b638f09f25474953.zip");
 	Str sokolToolsZipPath = StrLit("sokol_tools_1a9a4e5.zip");
 	Str sokolToolsZipRootFolder = StrLit("sokol-tools-bin-1a9a4e54090fec42c5d13169b638f09f25474953");
-	Str sokolToolsFolderPath = StrLit("../sokol_tools");
+	Str sokolToolsFolderPath = StrLit("../downloaded/sokol_tools");
 	if (!DoesFileExist(sokolToolsZipPath) || !DoesFolderExist(sokolToolsFolderPath))
 	{
 		PrintLine("Downloading Sokol Tools from \"%.*s\"", StrPrint(sokolToolsUrl));
@@ -652,7 +639,7 @@ void DownloadDCImguiIfNeeded()
 	Str dcImguiUrl = StrLit("https://github.com/floooh/dcimgui/archive/f276b9ce0d03004916441daa28504c686cd37ecc.zip");
 	Str dcImguiZipPath = StrLit("dcimgui_v1.92.7.zip");
 	Str dcImguiZipRootFolder = StrLit("dcimgui-f276b9ce0d03004916441daa28504c686cd37ecc");
-	Str dcImguiFolderPath = StrLit("../dcimgui");
+	Str dcImguiFolderPath = StrLit("../downloaded/dcimgui");
 	if (!DoesFileExist(dcImguiZipPath) || !DoesFolderExist(dcImguiFolderPath))
 	{
 		PrintLine("Downloading dcimgui from \"%.*s\"", StrPrint(dcImguiUrl));
@@ -667,6 +654,50 @@ void DownloadDCImguiIfNeeded()
 	}
 }
 
+void DownloadStbIfNeeded()
+{
+	// https://github.com/nothings/stb/commit/31c1ad37456438565541f4919958214b6e762fb4
+	// Commit 31c1ad3 from April 15th 2026 - "Update CONTRIBUTING.md with anti-LLM link"
+	Str stbUrl = StrLit("https://github.com/nothings/stb/archive/31c1ad37456438565541f4919958214b6e762fb4.zip");
+	Str stbZipPath = StrLit("stb_31c1ad3.zip");
+	Str stbZipRootFolder = StrLit("stb-31c1ad37456438565541f4919958214b6e762fb4");
+	Str stbFolderPath = StrLit("../downloaded/stb");
+	if (!DoesFileExist(stbZipPath) || !DoesFolderExist(stbFolderPath))
+	{
+		PrintLine("Downloading stb from \"%.*s\"", StrPrint(stbUrl));
+		// if (DoesFolderExist(stbFolderPath)) { MyRemoveDirectory(stbFolderPath, true); } //TODO: Enable me once MyRemoveDirectory is implemented for OSX/Linux!
+		DownloadAndExtractArchive(
+			stbUrl,
+			stbZipPath,
+			1757307, 0x415890FA5CBAC37E,
+			stbFolderPath,
+			stbZipRootFolder
+		);
+	}
+}
+
+void DownloadMicroUiIfNeeded()
+{
+	// https://github.com/rxi/microui/commit/0850aba860959c3e75fb3e97120ca92957f9d057
+	// Commit 0850aba from August 13th 2024 - "Version 2.02"
+	Str microUiUrl = StrLit("https://github.com/rxi/microui/archive/0850aba860959c3e75fb3e97120ca92957f9d057.zip");
+	Str microUiZipPath = StrLit("microUi_2.02.zip");
+	Str microUiZipRootFolder = StrLit("microui-0850aba860959c3e75fb3e97120ca92957f9d057");
+	Str microUiFolderPath = StrLit("../downloaded/microui");
+	if (!DoesFileExist(microUiZipPath) || !DoesFolderExist(microUiFolderPath))
+	{
+		PrintLine("Downloading microui from \"%.*s\"", StrPrint(microUiUrl));
+		// if (DoesFolderExist(microUiFolderPath)) { MyRemoveDirectory(microUiFolderPath, true); } //TODO: Enable me once MyRemoveDirectory is implemented for OSX/Linux!
+		DownloadAndExtractArchive(
+			microUiUrl,
+			microUiZipPath,
+			33738, 0x0188468AEB8DDC90,
+			microUiFolderPath,
+			microUiZipRootFolder
+		);
+	}
+}
+
 void DownloadNuklearIfNeeded()
 {
 	// https://github.com/Immediate-Mode-UI/Nuklear
@@ -674,7 +705,7 @@ void DownloadNuklearIfNeeded()
 	Str nuklearUrl = StrLit("https://github.com/Immediate-Mode-UI/Nuklear/archive/refs/tags/v4.13.3.zip");
 	Str nuklearZipPath = StrLit("nuklear_v4.13.3.zip");
 	Str nuklearZipRootFolder = StrLit("Nuklear-4.13.3");
-	Str nuklearFolderPath = StrLit("../nuklear");
+	Str nuklearFolderPath = StrLit("../downloaded/nuklear");
 	if (!DoesFileExist(nuklearZipPath) || !DoesFolderExist(nuklearFolderPath))
 	{
 		PrintLine("Downloading nuklear from \"%.*s\"", StrPrint(nuklearUrl));
