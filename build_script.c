@@ -28,6 +28,7 @@ Description:
 #define STB_FOLDER         DOWNLOADED_FOLDER "/stb"
 #define MICRO_UI_FOLDER    DOWNLOADED_FOLDER "/microui"
 #define NUKLEAR_FOLDER     DOWNLOADED_FOLDER "/nuklear"
+#define GLFW_FOLDER        DOWNLOADED_FOLDER "/glfw"
 
 #if BUILDING_ON_WINDOWS
 #define SHDC_BIN_PATH  SOKOL_TOOLS_FOLDER "/bin/win32/sokol-shdc.exe"
@@ -46,6 +47,7 @@ Description:
 void FillCommonArguments();
 void CompileSokolObjAndDll(Str objPath, Str dllPath, Str libPath);
 void CompileImguiWithAndWithoutDocking(Str regularDllPath, Str regularLibPath, Str dockingDllPath, Str dockingLibPath);
+void CompileGlfwGlueObj(Str objPath);
 bool CrossCompileShaderWithShdc(Str shaderGlslPath, Str shaderHeaderPath, Str shaderSrcPath, Str targetLanguages);
 void CompileSample(SampleDefinition* def, Str exampleName, Str exampleFileName, Str exampleSrcPath, Str exampleBinName, Str shaderSrcPath, Str sokolLibFile, Str sokolObjFile);
 
@@ -54,6 +56,7 @@ void DownloadDCImguiIfNeeded();
 void DownloadMicroUiIfNeeded();
 void DownloadStbIfNeeded();
 void DownloadNuklearIfNeeded();
+void DownloadGlfwIfNeeded();
 
 static CliArgs commonArgs = EMPTY;
 #if BUILDING_ON_WINDOWS
@@ -76,6 +79,7 @@ int main(int argc, char* argv[])
 	DownloadStbIfNeeded();
 	DownloadMicroUiIfNeeded();
 	DownloadNuklearIfNeeded();
+	DownloadGlfwIfNeeded();
 	
 	#if COPY_TO_BIN
 	if (!DoesFolderExist(StrLit("../bin"))) { mkdir("../bin", FOLDER_PERMISSIONS); }
@@ -107,6 +111,18 @@ int main(int argc, char* argv[])
 	CopyFileToFolder(dockingImguiDllPath, StrLit("../bin"), true);
 	#endif
 	
+	// +==============================+
+	// |    Compile glfw_glue.obj     |
+	// +==============================+
+	Str glfwGlueObjPath = StrLit("glfw_glue" OBJ_EXT);
+	CompileGlfwGlueObj(glfwGlueObjPath);
+	#if COPY_TO_BIN
+	#if BUILDING_ON_WINDOWS
+	Str glfwDllPath = ResolveRootTo(StrLit(GLFW_FOLDER "/lib-vc2022/glfw3.dll"), StrLit(".."));
+	CopyFileToFolder(glfwDllPath, StrLit("../bin"), true);
+	#endif
+	#endif
+	
 	// +--------------------------------------------------------------+
 	// |                       Compile Samples                        |
 	// +--------------------------------------------------------------+
@@ -117,7 +133,7 @@ int main(int argc, char* argv[])
 		SampleDefinition def = samples[sIndex];
 		Str exampleName = MakeStrNt(def.name);
 		Str exampleFileName = JoinStrings2(exampleName, MakeStrNt(def.isCpp ? ".cc" : ".c"));
-		Str exampleSrcPath = JoinStrings2(StrLit("[ROOT]/sapp/"), exampleFileName);
+		Str exampleSrcPath = FormatStr("[ROOT]/%s/%.*s", def.folder, StrPrint(exampleFileName));
 		Str exampleBinName = JoinStrings2(exampleName, StrLit(EXE_EXT));
 		StrReplaceChars(exampleBinName, '-', '_');
 		
@@ -193,6 +209,8 @@ void FillCommonArguments()
 	AddTaggedArgNt(&commonArgs, "basisu",        CLI_QUOTED_ARG, "[ROOT]/libs/basisu/sokol_basisu.cpp");
 	AddTaggedArgNt(&commonArgs, "microui",       CLI_QUOTED_ARG, MICRO_UI_FOLDER "/src/microui.c");
 	AddTaggedArgNt(&commonArgs, "nuklear",       CLI_QUOTED_ARG, "[ROOT]/libs/nuklear/nuklear.c");
+	AddTaggedArgNt(&commonArgs, "glfw",          CLI_QUOTED_ARG, GLFW_FOLDER "/lib-vc2022/glfw3dll.lib");
+	AddTaggedArgNt(&commonArgs, "glfw",          CLI_QUOTED_ARG, "glfw_glue" OBJ_EXT);
 	
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|stb",           CL_INCLUDE_DIR,    STB_FOLDER);
 	AddTaggedArgNt(&commonArgs, T_CLANG   "|stb",           CLANG_INCLUDE_DIR, STB_FOLDER);
@@ -208,7 +226,11 @@ void FillCommonArguments()
 	AddTaggedArgNt(&commonArgs, T_CLANG   "|microui",       CLANG_INCLUDE_DIR, MICRO_UI_FOLDER "/demo");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|nuklear",       CL_INCLUDE_DIR,    NUKLEAR_FOLDER);
 	AddTaggedArgNt(&commonArgs, T_CLANG   "|nuklear",       CLANG_INCLUDE_DIR, NUKLEAR_FOLDER);
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|glfw",          CL_INCLUDE_DIR,    GLFW_FOLDER "/include");
+	AddTaggedArgNt(&commonArgs, T_CLANG   "|glfw",          CLANG_INCLUDE_DIR, GLFW_FOLDER "/include");
 	
+	AddTaggedArgNt(&commonArgs, T_MSVC_CL "glfw",     CL_DEFINE, "SOKOL_GLCORE");
+	AddTaggedArgNt(&commonArgs, T_CLANG   "glfw",     CLANG_DEFINE, "SOKOL_GLCORE");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|qoi",     CL_DEFINE, "QOI_IMPLEMENTATION");
 	AddTaggedArgNt(&commonArgs, T_MSVC_CL "|nuklear", CL_DISABLE_WARNING, "5287"); //operands are different enum types 'nk_edit_types' and 'nk_edit_flags'; use an explicit cast to silence this warning
 	
@@ -427,6 +449,43 @@ void CompileImguiWithAndWithoutDocking(Str regularDllPath, Str regularLibPath, S
 	}
 }
 
+void CompileGlfwGlueObj(Str objPath)
+{
+	if (!DoesFileExist(objPath))
+	{
+		CliArgs args = EMPTY;
+		// AddTaggedArgNt(&args, T_CLANG T_OSX, "-x [VAL]", "objective-c");
+		AddArgNt(&args, CLI_QUOTED_ARG, "[ROOT]/glfw/glfw_glue.c");
+		AddTaggedArg(&args, T_MSVC_CL, CL_COMPILE);
+		AddTaggedArg(&args, T_CLANG, CLANG_COMPILE);
+		AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, objPath);
+		AddTaggedArgStr(&args, T_CLANG, CLANG_OUTPUT_FILE, objPath);
+		AddTaggedArgNt(&args, T_MSVC_CL, CL_PDB_FILE, "glfw_glue.pdb");
+		AddTaggedArgNt(&args, T_MSVC_CL, CL_INCLUDE_DIR, GLFW_FOLDER "/include");
+		AddTaggedArgNt(&args, T_CLANG, CLANG_INCLUDE_DIR, GLFW_FOLDER "/include");
+		AddArgList(&args, &commonArgs);
+		
+		#if BUILDING_ON_WINDOWS
+		{
+			PrintLine("[Building %.*s for WINDOWS...]", StrPrint(objPath));
+			InitializeMsvcIf(StrLit(PIG_BUILD_ROOT), &isMsvcInitialized);
+			RunCliProgramAndExitOnFailureTagsLit(StrLit(EXE_MSVC_CL), T_MSVC_CL T_WINDOWS T_LANG_C, &args, FormatStr("Failed to compile glfw_glue.c into %.*s", StrPrint(objPath)));
+			AssertFileExist(objPath, true);
+			PrintLine("[Successfully built %.*s for WINDOWS!]", StrPrint(objPath));
+		}
+		#elif BUILDING_ON_OSX
+		{
+			PrintLine("[Building %.*s for OSX...]", StrPrint(objPath));
+			RunCliProgramAndExitOnFailureTagsLit(StrLit(EXE_CLANG), T_CLANG T_OSX T_LANG_C, &args, FormatStr("Failed to compile glfw_glue.c into %.*s", StrPrint(objPath)));
+			AssertFileExist(objPath, true);
+			PrintLine("[Successfully built %.*s for OSX!]", StrPrint(objPath));
+		}
+		#else
+		#error The current platform is not supported yet!
+		#endif
+	}
+}
+
 bool CrossCompileShaderWithShdc(Str shaderGlslPath, Str shaderHeaderPath, Str shaderSrcPath, Str targetLanguages)
 {
 	Str shaderGlslFileName = GetFileNamePart(shaderGlslPath, true);
@@ -485,7 +544,8 @@ void CompileSample(SampleDefinition* def, Str exampleName, Str exampleFileName, 
 	
 	CliArgs args = EMPTY;
 	AddArgStr(&args, CLI_QUOTED_ARG, exampleSrcPath);
-	if (def->useSokolDll) { AddArgStr(&args, CLI_QUOTED_ARG, sokolLibFile); }
+	if (def->noSokolObj) { /* Add nothing */ }
+	else if (def->useSokolDll) { AddArgStr(&args, CLI_QUOTED_ARG, sokolLibFile); }
 	else { AddArgStr(&args, CLI_QUOTED_ARG, sokolObjFile); }
 	if (def->hasShader) { AddArgStr(&args, CLI_QUOTED_ARG, shaderSrcPath); }
 	AddTaggedArgStr(&args, T_MSVC_CL, CL_BINARY_FILE, exampleBinName);
@@ -662,6 +722,29 @@ void DownloadNuklearIfNeeded()
 			2452230, 0x43B1710B6B246AF2,
 			nuklearFolderResolved,
 			nuklearZipRootFolder
+		);
+	}
+}
+
+void DownloadGlfwIfNeeded()
+{
+	// 
+	// https://github.com/glfw/glfw/
+	// v3.4 from Feb 23rd 2024 - https://github.com/glfw/glfw/releases/tag/3.4
+	Str glfwUrl = StrLit("https://github.com/glfw/glfw/releases/download/3.4/glfw-3.4.bin.WIN64.zip");
+	Str glfwZipPath = StrLit("glfw-3.4.bin.WIN64.zip");
+	Str glfwZipRootFolder = StrLit("glfw-3.4.bin.WIN64");
+	Str glfwFolderResolved = ResolveRootTo(StrLit(GLFW_FOLDER), StrLit(".."));
+	if (!DoesFileExist(glfwZipPath) || !DoesFolderExist(glfwFolderResolved))
+	{
+		PrintLine("Downloading glfw from \"%.*s\"", StrPrint(glfwUrl));
+		// if (DoesFolderExist(glfwFolderPath)) { MyRemoveDirectory(glfwFolderPath, true); } //TODO: Enable me once MyRemoveDirectory is implemented for OSX/Linux!
+		DownloadAndExtractArchive(
+			glfwUrl,
+			glfwZipPath,
+			3284918, 0x9D76DA3E48D5E5E7,
+			glfwFolderResolved,
+			glfwZipRootFolder
 		);
 	}
 }
